@@ -63,6 +63,11 @@ Each room has its own history file, written only by that room's monitor, so seve
 open at once without conflicts. Days are stored separately and replaced on each save, so
 autosaves never double-count. A stream that runs past midnight still counts as one day.
 
+History is kept forever by default. Set **Forget accounts not seen for N days** in Settings
+(`pruneAfterDays`) to drop accounts whose last sighting in a room is older than that; pruning
+runs when a room opens and on every save, and never touches pinned or watched accounts. Daily
+snapshot and chat/log text files are not deleted.
+
 ## Blacklisted streamers (cross-checking rooms)
 
 Each room has its own blacklist of streamers to cross-check against. Add the rival as a room
@@ -152,6 +157,7 @@ takes the flags shown in brackets.
 | `reconnectWhenLive`  | `true`                     | if offline, wait for the stream instead of giving up |
 | `livePollSeconds`    | `60`                       | how often to check for the stream while waiting (min 30) |
 | `chatHistory`        | `50`                       | recent chat messages kept per user |
+| `pruneAfterDays`     | `0`                        | forget accounts not seen for this many days; `0` keeps them forever (`--prune n`). Pinned and watched accounts are kept |
 | `logEvents`          | `true`                     | terminal client: print joins/leaves/gifts (`--quiet` to start off) |
 | `logChat`            | `false`                    | terminal client: also print every chat message (`--chat`) |
 | `chatToFile`         | `false`                    | append every chat message to `data/chat-<room>-<date>.txt` (`--chat-file`) |

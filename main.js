@@ -77,7 +77,7 @@ const getMonitor = name => {
 // ---------- IPC ----------
 ipcMain.handle('config:get', () => ({ ...configToJSON(cfg), configFile: CONFIG_FILE }));
 ipcMain.handle('config:set', (_e, patch) => {
-  const allowed = ['idleTimeoutMinutes', 'burnerAlertScore', 'autosaveMinutes', 'signApiKey', 'reconnectWhenLive', 'livePollSeconds', 'chatHistory', 'resume', 'logChat', 'logEvents', 'chatToFile', 'eventsToFile'];
+  const allowed = ['idleTimeoutMinutes', 'burnerAlertScore', 'autosaveMinutes', 'signApiKey', 'reconnectWhenLive', 'livePollSeconds', 'chatHistory', 'resume', 'logChat', 'logEvents', 'chatToFile', 'eventsToFile', 'pruneAfterDays'];
   const next = { ...cfg };
   for (const k of allowed) if (patch && patch[k] !== undefined) next[k] = patch[k];
   normalizeConfig(next, null); // throws on bad values; dataDir already absolute

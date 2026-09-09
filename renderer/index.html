@@ -106,6 +106,7 @@
       <label>Autosave every (minutes, 0 = off) <input name="autosaveMinutes" type="number" min="0" step="1"></label>
       <label>Live check while offline (seconds) <input name="livePollSeconds" type="number" min="30" step="1"></label>
       <label>Chat messages kept per user <input name="chatHistory" type="number" min="1" step="1"></label>
+      <label>Forget accounts not seen for this many days (0 = keep forever; pinned and watched accounts are always kept) <input name="pruneAfterDays" type="number" min="0" step="1"></label>
       <label>Euler Stream API key (optional) <input name="signApiKey" type="password" autocomplete="off"></label>
       <label class="check"><input name="reconnectWhenLive" type="checkbox"> wait for offline streamers to go live</label>
       <label class="check"><input name="resume" type="checkbox"> resume today's snapshot on start</label>

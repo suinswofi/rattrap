@@ -101,6 +101,24 @@ export class RoomHistory {
   }
 
   summary(u) { return RoomHistory.summarize(this.get(u)); }
+
+  /**
+   * Forget accounts whose last sighting is older than `maxAgeMs`. Usernames (or aliases) in
+   * `keep` are never removed. Returns the number of records dropped.
+   */
+  prune(maxAgeMs, keep = new Set(), now = Date.now()) {
+    if (!(maxAgeMs > 0)) return 0;
+    const cutoff = now - maxAgeMs;
+    let dropped = 0;
+    for (const [key, rec] of [...this.users.entries()]) {
+      if (lastSeen(rec) >= cutoff) continue;
+      if ([rec.username, ...(rec.aliases ?? [])].some(n => n && keep.has(n.toLowerCase()))) continue;
+      this.users.delete(key);
+      for (const n of [rec.username, ...(rec.aliases ?? [])]) if (n && this.byName.get(n.toLowerCase()) === key) this.byName.delete(n.toLowerCase());
+      dropped++;
+    }
+    return dropped;
+  }
 }
 
 const firstSeen = rec => Math.min(...Object.values(rec.days).map(d => d.firstSeen ?? Infinity));

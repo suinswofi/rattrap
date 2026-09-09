@@ -295,3 +295,36 @@ test('chat and event log can be appended to per-room text files', async () => {
     m.stop();
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('old accounts are pruned from history when enabled, except pinned and watched', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'bouncer-'));
+  try {
+    const now = Date.now();
+    const seed = new Monitor('host', normalizeConfig({ ...DEFAULTS, dataDir: dir, autosaveMinutes: 0 }, null), { createConnection: () => new FakeConnection() });
+    const t = seed.tracker;
+    t.join('ancient', { userId: 'A' }, now - 400 * DAY); t.get('ancient').lastSeen = now - 400 * DAY;
+    t.join('old_pinned', { userId: 'P' }, now - 300 * DAY); t.get('old_pinned').lastSeen = now - 300 * DAY;
+    t.join('old_watched', { userId: 'W' }, now - 300 * DAY); t.get('old_watched').lastSeen = now - 300 * DAY;
+    t.join('recent', { userId: 'R' }, now - 10 * DAY); t.get('recent').lastSeen = now - 10 * DAY;
+    seed.history.update(t.all(), '2025-01-01', now); seed.history.save();
+    assert.equal(seed.history.users.size, 4);
+
+    // default: nothing is forgotten
+    const keepAll = new Monitor('host', normalizeConfig({ ...DEFAULTS, dataDir: dir, autosaveMinutes: 0 }, null), { createConnection: () => new FakeConnection() });
+    keepAll.start(); await tick();
+    assert.equal(keepAll.history.users.size, 4);
+    keepAll.stop();
+
+    // 180 days, with one old account pinned and one watched
+    const cfg = normalizeConfig({ ...DEFAULTS, dataDir: dir, autosaveMinutes: 0, pruneAfterDays: 180, lists: { host: { pinned: ['old_pinned'], watch: ['old_watched'] } } }, null);
+    const m = new Monitor('host', cfg, { createConnection: () => new FakeConnection() });
+    m.start(); await tick();
+    assert.deepEqual([...m.history.users.values()].map(r => r.username).sort(), ['old_pinned', 'old_watched', 'recent']);
+    assert.equal(m.history.get('ancient'), null);
+    assert.ok(m.logLines.some(l => l.text.includes('forgot 1 account not seen in 180 days')));
+    m.save();
+    const onDisk = JSON.parse(readFileSync(m.history.file, 'utf8'));
+    assert.equal(Object.keys(onDisk.users).length, 3);
+    m.stop();
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});

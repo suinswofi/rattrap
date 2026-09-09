@@ -35,6 +35,7 @@ export const DEFAULTS = {
   reconnectWhenLive: true,
   livePollSeconds: 60,
   chatHistory: 50,
+  pruneAfterDays: 0,         // forget accounts not seen for this many days (0 = keep forever); pinned/watched are kept
   logEvents: true,
   logChat: false,
   chatToFile: false,         // append every chat message to data/chat-<room>-<date>.txt
@@ -71,6 +72,7 @@ export function normalizeConfig(cfg, baseDir) {
   cfg.autosaveMinutes = Math.max(0, Number(cfg.autosaveMinutes) || 0);
   cfg.livePollSeconds = Math.max(30, Number(cfg.livePollSeconds) || 60);
   cfg.chatHistory = Math.max(1, Number(cfg.chatHistory) || 50);
+  cfg.pruneAfterDays = Math.max(0, Number(cfg.pruneAfterDays) || 0);
   cfg.signApiKey = String(cfg.signApiKey ?? '');
   if (baseDir && !isAbsolute(cfg.dataDir)) cfg.dataDir = pathJoin(baseDir, cfg.dataDir);
   return cfg;
@@ -143,8 +145,11 @@ export class Monitor extends EventEmitter {
     this.startedAt = Date.now();
     this.sessionDate = dateOf(this.startedAt);
     this.tracker.timeoutMs = this.cfg.idleTimeoutMinutes * 60_000;
-    try { const n = this.history.load(); if (n) this._log('system', `history: ${n} users known in this room`); }
-    catch (e) { this._log('error', `could not load ${this.history.file}: ${e.message}`); }
+    try {
+      const n = this.history.load();
+      if (n) this._log('system', `history: ${n} users known in this room`);
+      this.pruneHistory();
+    } catch (e) { this._log('error', `could not load ${this.history.file}: ${e.message}`); }
     if (this.cfg.resume && existsSync(this.snapshotFile)) {
       try { const n = this.tracker.load(JSON.parse(readFileSync(this.snapshotFile, 'utf8'))); this._log('system', `resumed ${n} user records from today's snapshot`); }
       catch (e) { this._log('error', `could not load ${this.snapshotFile}: ${e.message}`); }
@@ -421,6 +426,16 @@ export class Monitor extends EventEmitter {
 
   refreshRoomIndex() { this.roomIndex = loadRoomIndex(this.cfg.dataDir, this.username); return this.roomIndex; }
 
+  /** Drop history records older than cfg.pruneAfterDays (if enabled), keeping pinned and watched accounts. */
+  pruneHistory(now = Date.now()) {
+    const days = this.cfg.pruneAfterDays;
+    if (!(days > 0)) return 0;
+    const keep = new Set([...this.lists.pinned, ...this.lists.watch]);
+    const n = this.history.prune(days * 24 * 60 * 60_000, keep, now);
+    if (n) this._log('system', `forgot ${n} account${n === 1 ? '' : 's'} not seen in ${days} days`);
+    return n;
+  }
+
   /** One display row per tracker record: raw numbers, formatting is the caller's job. */
   row(u, now = Date.now()) {
     const h = this.history.summary(u);
@@ -504,6 +519,7 @@ export class Monitor extends EventEmitter {
     const out = { room: this.username, savedAt: new Date().toISOString(), monitorStartedAt: this.startedAt, timeoutMs: this.tracker.timeoutMs, viewerCount: this.room.viewers, users };
     writeFileSync(file, JSON.stringify(out, null, 2));
     this.history.update(this.tracker.all(), this.sessionDate ?? dateOf(Date.now()));
+    this.pruneHistory();
     this.history.save();
     const r = { file, count: users.length };
     this.emit('saved', r);

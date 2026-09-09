@@ -14,6 +14,7 @@
 //   --no-resume            do not load today's saved snapshot on start
 //   --quiet                start with the live event log off
 //   --chat                 also print every chat message in the event log
+//   --prune <days>         forget accounts not seen for this many days (pinned/watched are kept)
 //   --chat-file            append every chat message to data/chat-<room>-<date>.txt
 //   --log-file             append the event log to data/log-<room>-<date>.txt
 //
@@ -38,7 +39,7 @@ function parseArgs(argv) {
     const a = argv[i];
     if (!a.startsWith('--')) { out._.push(a); continue; }
     const key = a.slice(2);
-    const takesValue = ['config', 'timeout', 'watch', 'blacklist', 'alert', 'key', 'data'].includes(key);
+    const takesValue = ['config', 'timeout', 'watch', 'blacklist', 'alert', 'key', 'data', 'prune'].includes(key);
     out[key] = takesValue ? argv[++i] : true;
   }
   return out;
@@ -58,6 +59,7 @@ if (args._[0]) cfg.username = args._[0];
 else if (process.env.TIKTOK_USER) cfg.username = process.env.TIKTOK_USER;
 if (args.timeout) cfg.idleTimeoutMinutes = Number(args.timeout);
 if (args.alert) cfg.burnerAlertScore = Number(args.alert);
+if (args.prune) cfg.pruneAfterDays = Number(args.prune);
 if (args.data) cfg.dataDir = args.data;
 if (args['no-resume']) cfg.resume = false;
 if (args.quiet) cfg.logEvents = false;
@@ -242,7 +244,7 @@ const commands = {
 title: ${s.title ?? '-'}
 viewers now: ${s.viewers ?? '?'}   total viewers (tiktok): ${s.totalViewers ?? '?'}   likes: ${s.likes ?? '?'}
 tracked: ${s.counts.seen} users seen, ${s.counts.present} believed present, ${s.counts.chatted} chatted, ${s.counts.gifted} gifted, ${s.counts.flagged} flagged
-history: ${s.counts.known} users ever seen here   other rooms: ${s.otherRooms.length}   blacklist: ${[...lists.blacklist].join(', ') || '-'}   alert at score: ${cfg.burnerAlertScore}
+history: ${s.counts.known} users ever seen here (${cfg.pruneAfterDays ? `forgotten after ${cfg.pruneAfterDays} days` : 'kept forever'})   other rooms: ${s.otherRooms.length}   blacklist: ${[...lists.blacklist].join(', ') || '-'}   alert at score: ${cfg.burnerAlertScore}
 idle timeout: ${cfg.idleTimeoutMinutes}m   autosave: ${cfg.autosaveMinutes ? `every ${cfg.autosaveMinutes}m` : 'off'}   watch: ${[...lists.watch].join(', ') || '-'}
 files: chat ${cfg.chatToFile ? monitor.chatFile : 'off'}   events ${cfg.eventsToFile ? monitor.eventsFile : 'off'}`);
   },
