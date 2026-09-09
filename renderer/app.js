@@ -285,6 +285,50 @@ api.onEvent(ev => {
   }
 });
 
+// ---------- help ----------
+const HELP = {
+  blacklist: {
+    title: 'Blacklist: streamers to cross-check against',
+    body: `
+<p>The blacklist holds <b>other streamers</b>, not viewers. Bouncer uses their rooms as reference points: for everyone in this room it checks whether they overlap with a blacklisted streamer, and flags them if so.</p>
+<p>It belongs to <b>this room only</b>. Each room you monitor has its own blacklist.</p>
+<p><b>Setup:</b> add the other streamer as a room in the Rooms list <i>and</i> put them on this room's blacklist. Bouncer can only learn who is in their room, and who follows them, by sitting in that room while they are live.</p>
+<p>A viewer here is flagged when any of these is true:</p>
+<ul>
+  <li><b>In their room right now.</b> Both rooms are open and the same account is present in both. Fires whichever room they enter second.</li>
+  <li><b>Follows them.</b> TikTok reports, inside the streamer's own room, whether each viewer follows that host. Bouncer remembers it, so this keeps working on later days even when the streamer is offline.</li>
+  <li><b>Seen in their room before.</b> The account appears in that room's history from an earlier day.</li>
+</ul>
+<p>A hit adds points to the burner score, fires an alert on join, and tags the viewer <code>NOW:@name</code> or <code>BL:@name</code> in the tables and the detail drawer.</p>
+<div class="example"><b>Example.</b> You monitor <code>@alice</code> and <code>@bob</code>. Add <code>@bob</code> to <code>@alice</code>'s blacklist. When someone who follows <code>@bob</code>, or who is sitting in <code>@bob</code>'s room, joins <code>@alice</code>'s room, you get an alert in <code>@alice</code>'s room.</div>
+<p>Bouncer never reads anyone's following list. It only learns follows from the blacklisted streamer's own room.</p>`,
+  },
+  watch: {
+    title: 'Watch list: viewers you want to keep an eye on',
+    body: `
+<p>The watch list holds <b>specific viewer accounts</b>. It does not change anyone's score; it just makes sure you never miss what they do in this room.</p>
+<p>It belongs to <b>this room only</b>. Each room you monitor has its own watch list.</p>
+<p>For a watched viewer, every <b>join, chat, gift, follow and share</b>:</p>
+<ul>
+  <li>pops up as a toast,</li>
+  <li>is highlighted in the Log tab,</li>
+  <li>and the account is tagged <code>watch</code> in the tables.</li>
+</ul>
+<p>Add someone by typing their username below, or with the <b>Watch</b> button in a viewer's detail drawer.</p>
+<div class="example"><b>Typical flow.</b> The blacklist or the Suspects tab surfaces an account that looks like a burner. Put it on the watch list, and from then on every move it makes in this room is announced.</div>
+<p>Cross-room alerts do not need the watch list: anyone who overlaps with a blacklisted streamer is flagged, watched or not.</p>`,
+  },
+};
+function openHelp(key) {
+  const h = HELP[key]; if (!h) return;
+  $('#help-title').textContent = h.title;
+  $('#help-body').innerHTML = h.body;
+  $('#help').hidden = false;
+}
+document.addEventListener('click', e => { const b = e.target.closest('button[data-help]'); if (b) openHelp(b.dataset.help); });
+$('#help-close').addEventListener('click', () => { $('#help').hidden = true; });
+$('#help').addEventListener('click', e => { if (e.target.id === 'help') $('#help').hidden = true; });
+
 // ---------- UI wiring ----------
 $('#room-list').addEventListener('click', e => { const li = e.target.closest('li[data-room]'); if (li) selectRoom(li.dataset.room); });
 $('#add-room').addEventListener('submit', async e => {
@@ -342,7 +386,7 @@ $('#settings-form').addEventListener('submit', async e => {
   try { await api.setConfig(patch); await loadConfig(); $('#settings').hidden = true; toast('Settings saved', '', 'ok', 3000); scheduleRefresh(); }
   catch (err) { toast('Settings not saved', err.message, 'error'); }
 });
-document.addEventListener('keydown', e => { if (e.key === 'Escape') { if (!$('#settings').hidden) $('#settings').hidden = true; else closeDetail(); } });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') { if (!$('#help').hidden) $('#help').hidden = true; else if (!$('#settings').hidden) $('#settings').hidden = true; else closeDetail(); } });
 
 // ---------- boot ----------
 (async () => {

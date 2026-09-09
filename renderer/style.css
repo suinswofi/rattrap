@@ -45,9 +45,11 @@ a { color: var(--purple-light); }
 }
 .side-section { padding: 12px 12px 6px; border-bottom: 1px solid var(--border); }
 .side-section:nth-of-type(1) { flex: 1 1 auto; min-height: 120px; overflow: auto; }
-.side-section h3 { margin: 0 4px 8px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
-.for-room { color: var(--purple-light); text-transform: none; letter-spacing: 0; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 120px; }
-.hint { display: inline-grid; place-items: center; width: 14px; height: 14px; border-radius: 50%; background: var(--border-strong); color: var(--text); font-size: 10px; cursor: help; }
+.side-section h3 { margin: 0 4px 8px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.for-room { color: var(--purple-light); text-transform: none; letter-spacing: 0; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 0 1 auto; min-width: 0; }
+.hint { flex: none; }
+.hint { display: inline-grid; place-items: center; width: 16px; height: 16px; padding: 0; border: 0; border-radius: 50%; background: var(--border-strong); color: var(--text); font-size: 11px; font-weight: 700; cursor: pointer; }
+.hint:hover { background: var(--purple); color: #fff; }
 .side-list { list-style: none; margin: 0; padding: 0; }
 .side-list li { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 4px; cursor: pointer; color: var(--muted); }
 .side-list li:hover { background: var(--hover); color: var(--text); }
@@ -200,6 +202,16 @@ td .flag { display: inline-block; font-size: 10px; font-weight: 700; padding: 1p
 .modal { position: fixed; inset: 0; background: rgba(0, 0, 0, .6); display: grid; place-items: center; z-index: 20; }
 .dialog { width: 460px; background: var(--elevated); border: 1px solid var(--border-strong); border-radius: 8px; padding: 20px 22px; box-shadow: 0 20px 60px rgba(0, 0, 0, .6); }
 .dialog h2 { margin: 0 0 14px; font-size: 16px; }
+.dialog-head { display: flex; justify-content: space-between; align-items: flex-start; }
+.dialog-head h2 { margin-bottom: 8px; }
+.dialog.help { width: 560px; max-height: 80vh; overflow: auto; user-select: text; }
+.dialog.help p, .dialog.help li { color: var(--muted); line-height: 1.55; }
+.dialog.help p { margin: 8px 0; }
+.dialog.help ul, .dialog.help ol { margin: 6px 0 10px; padding-left: 20px; }
+.dialog.help li { margin: 4px 0; }
+.dialog.help b { color: var(--text); }
+.dialog.help code { background: var(--bg); border: 1px solid var(--border); border-radius: 3px; padding: 0 4px; font-family: var(--mono); font-size: 12px; color: var(--purple-light); }
+.dialog.help .example { background: var(--surface); border-left: 3px solid var(--purple); border-radius: 4px; padding: 8px 12px; margin: 10px 0; }
 .dialog form { display: grid; gap: 10px; }
 .dialog form > label:not(.check) { display: grid; gap: 4px; color: var(--muted); font-size: 12px; }
 .dialog form > label:not(.check) input { color: var(--text); }

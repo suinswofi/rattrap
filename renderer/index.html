@@ -18,13 +18,13 @@
     </section>
 
     <section class="side-section">
-      <h3>Blacklist <span class="for-room" id="blacklist-room"></span> <span class="hint" title="Per room. Streamers to cross-check against. Add their room above as well: anyone in this room who is also in their room right now, follows them, or has been seen there before gets flagged.">?</span></h3>
+      <h3>Blacklist <span class="for-room" id="blacklist-room"></span> <button class="hint" data-help="blacklist" title="What is the blacklist?">?</button></h3>
       <ul id="blacklist" class="side-list chips"></ul>
       <form id="add-blacklist" class="side-add"><input placeholder="add @streamer" autocomplete="off" spellcheck="false"><button type="submit">+</button></form>
     </section>
 
     <section class="side-section">
-      <h3>Watch list <span class="for-room" id="watchlist-room"></span> <span class="hint" title="Per room. Viewers whose joins, chats and gifts in this room always pop up as alerts.">?</span></h3>
+      <h3>Watch list <span class="for-room" id="watchlist-room"></span> <button class="hint" data-help="watch" title="What is the watch list?">?</button></h3>
       <ul id="watchlist" class="side-list chips"></ul>
       <form id="add-watch" class="side-add"><input placeholder="add @viewer" autocomplete="off" spellcheck="false"><button type="submit">+</button></form>
     </section>
@@ -108,6 +108,13 @@
         <button type="submit" class="btn primary">Save</button>
       </div>
     </form>
+  </div>
+</div>
+
+<div id="help" class="modal" hidden>
+  <div class="dialog help">
+    <div class="dialog-head"><h2 id="help-title"></h2><button id="help-close" class="icon-btn" title="Close">×</button></div>
+    <div id="help-body"></div>
   </div>
 </div>
 
