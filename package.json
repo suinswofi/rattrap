@@ -4,6 +4,7 @@
   "description": "TikTok LIVE room monitor that remembers viewers across streams and flags likely burner accounts",
   "author": "Consty",
   "homepage": "https://github.com/suinswofi/rattrap",
+  "license": "PolyForm-Noncommercial-1.0.0",
   "private": true,
   "type": "module",
   "main": "main.js",

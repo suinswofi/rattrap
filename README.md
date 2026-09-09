@@ -196,3 +196,8 @@ events; a dash means it was never delivered. Account creation dates and bios exi
 schema but are never filled in LIVE events (checked against real rooms), so Rat Trap does not show
 or score them. Follow status towards another
 streamer is only known for rooms Rat Trap has monitored.
+
+## License
+
+[PolyForm Noncommercial License 1.0.0](LICENSE). Free to use, modify and share for any
+noncommercial purpose; commercial use is not permitted.
