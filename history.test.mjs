@@ -25,7 +25,7 @@ test('tracker keeps profile fields and time in room', () => {
 });
 
 test('history persists across days, sums totals and tracks renames', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'bouncer-'));
+  const dir = mkdtempSync(join(tmpdir(), 'rattrap-'));
   try {
     const file = historyFile(dir, 'host');
     const h1 = new RoomHistory('host', file);
@@ -66,7 +66,7 @@ test('records without an id are adopted once the id is known', () => {
 });
 
 test('cross-room index reports follow status towards other hosts', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'bouncer-'));
+  const dir = mkdtempSync(join(tmpdir(), 'rattrap-'));
   try {
     const bad = new RoomHistory('badguy', historyFile(dir, 'badguy'));
     const t = new ViewerTracker();

@@ -1,12 +1,12 @@
-# Bouncer
+# TikTok Rat Trap
 
-A doorman for your TikTok LIVE room. Bouncer watches who comes in, remembers them across
+A trap for the rats in your TikTok LIVE room. Rat Trap watches who comes in, remembers them across
 streams, and points out accounts that look like throwaways: brand-new profiles, zero followers,
 auto-generated names, drive-by visits, renamed accounts, and viewers who follow streamers you
 have blacklisted. It exists to help a streamer work out which accounts are likely burners used
 to file bogus abuse reports.
 
-Bouncer is an Electron desktop app with a Twitch-style dark interface.
+TikTok Rat Trap is an Electron desktop app with a Twitch-style dark interface.
 
 ```sh
 npm install
@@ -41,8 +41,8 @@ npm test
 If a streamer is offline the monitor waits and connects when they go live. It reconnects after
 drops, marks everyone as gone when the stream ends, autosaves, and resumes today's snapshot on
 restart. On connect it also replays TikTok's backlog of recent events, stamped with TikTok's own
-timestamps, so people who arrived shortly before Bouncer connected are picked up with their real
-arrival time (their log lines say "before Bouncer connected").
+timestamps, so people who arrived shortly before Rat Trap connected are picked up with their real
+arrival time (their log lines say "before Rat Trap connected").
 
 ## What is remembered
 
@@ -68,7 +68,7 @@ snapshot and chat/log text files are not deleted.
 ## Blacklisted streamers (cross-checking rooms)
 
 Each room has its own blacklist of streamers to cross-check against. Add the rival as a room
-**and** to your room's blacklist. Then, for anyone in your room, Bouncer checks three things and
+**and** to your room's blacklist. Then, for anyone in your room, Rat Trap checks three things and
 flags them if any apply:
 
 - **In their room right now.** Both rooms are open in the app and the same account is present
@@ -76,12 +76,12 @@ flags them if any apply:
   while already in the rival's, and when they walk into the rival's room while sitting in yours.
 - **Follows them.** TikTok does not expose who follows whom, but every event a viewer generates
   in a room carries their follow status towards *that room's host*. While the rival is live and
-  monitored, Bouncer records which viewers follow them. This works regardless of the viewer's
+  monitored, Rat Trap records which viewers follow them. This works regardless of the viewer's
   privacy settings.
 - **Seen there before.** Their account appears in the rival's room history from an earlier day.
 
 Blacklists are per room, so watching two streamers with different rivals keeps the alerts
-separate. Bouncer never scrapes anyone's following list; a follow is only learned from the
+separate. Rat Trap never scrapes anyone's following list; a follow is only learned from the
 rival's own room. Other rooms' histories are re-read whenever any room saves.
 
 ## Burner score
@@ -118,8 +118,8 @@ couple of points. Rely on the profile-based reasons and the blacklist, not on th
 ## Building installers
 
 ```sh
-npm run dist:linux     # dist/Bouncer-<version>-linux-x86_64.AppImage
-npm run dist:win       # dist/Bouncer-<version>-setup.exe (installer) and Bouncer-<version>-portable.exe
+npm run dist:linux     # dist/TikTok Rat Trap-<version>-linux-x86_64.AppImage
+npm run dist:win       # dist/TikTok Rat Trap-<version>-setup.exe (installer) and TikTok Rat Trap-<version>-portable.exe
 npm run dist           # both
 ```
 
@@ -130,8 +130,8 @@ artifacts; pushing a tag such as `v1.0.1` also publishes them to a GitHub releas
 The packages are not code-signed, so Windows SmartScreen will warn on first run
 ("More info" → "Run anyway"). The AppImage needs to be marked executable (`chmod +x`).
 
-A packaged Bouncer keeps `config.json` and the `data/` folder in the per-user app data
-directory (`~/.config/bouncer` on Linux, `%APPDATA%\bouncer` on Windows); the Data folder button
+A packaged Rat Trap keeps `config.json` and the `data/` folder in the per-user app data
+directory (`~/.config/TikTok Rat Trap` on Linux, `%APPDATA%\TikTok Rat Trap` on Windows); the Data folder button
 opens it. Running from the repo uses the files next to the code.
 
 ## Configuration
@@ -178,6 +178,6 @@ that: no client sees more joins than TikTok chooses to send.
 
 Follower counts and the other profile fields are whatever TikTok attaches to the viewer's own
 events; a dash means it was never delivered. Account creation dates and bios exist in TikTok's
-schema but are never filled in LIVE events (checked against real rooms), so Bouncer does not show
+schema but are never filled in LIVE events (checked against real rooms), so Rat Trap does not show
 or score them. Follow status towards another
-streamer is only known for rooms Bouncer has monitored.
+streamer is only known for rooms Rat Trap has monitored.

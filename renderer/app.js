@@ -1,8 +1,8 @@
-// Bouncer renderer. Talks to the main process only through window.bouncer (see preload.cjs).
+// TikTok Rat Trap renderer. Talks to the main process only through window.rattrap (see preload.cjs).
 'use strict';
 
 const $ = s => document.querySelector(s);
-const api = window.bouncer;
+const api = window.rattrap;
 
 const state = {
   rooms: [], current: null, snap: null, config: null,
@@ -102,9 +102,9 @@ const COLUMNS = [
 
 // ---------- column widths (drag the header edge; double-click resets; remembered per machine) ----------
 const MIN_COL = 40;
-const colWidths = (() => { try { return JSON.parse(localStorage.getItem('bouncer.colWidths') || '{}'); } catch { return {}; } })();
+const colWidths = (() => { try { return JSON.parse(localStorage.getItem('rattrap.colWidths') || '{}'); } catch { return {}; } })();
 const colWidth = c => Math.max(MIN_COL, Number(colWidths[c.key]) || c.width);
-const saveColWidths = () => { try { localStorage.setItem('bouncer.colWidths', JSON.stringify(colWidths)); } catch { /* private mode etc. */ } };
+const saveColWidths = () => { try { localStorage.setItem('rattrap.colWidths', JSON.stringify(colWidths)); } catch { /* private mode etc. */ } };
 
 function applyColWidths() {
   const table = $('#users-table');
@@ -357,7 +357,7 @@ api.onEvent(ev => {
   switch (ev.type) {
     case 'log':
       if (ev.room) appendLine(ev.room, ev.entry);
-      if (ev.entry.kind === 'error') toast(ev.room ? `@${ev.room}` : 'Bouncer', ev.entry.text, 'error');
+      if (ev.entry.kind === 'error') toast(ev.room ? `@${ev.room}` : 'Rat Trap', ev.entry.text, 'error');
       else if (ev.entry.watched && ['join', 'rejoin', 'chat', 'gift', 'follow', 'share'].includes(ev.entry.kind)) toast(`★ @${ev.entry.user} in @${ev.room}`, `${ev.entry.kind}: ${ev.entry.text}`);
       break;
     case 'flag':
@@ -380,18 +380,18 @@ const HELP = {
   blacklist: {
     title: 'Blacklist: streamers to cross-check against',
     body: `
-<p>The blacklist holds <b>other streamers</b>, not viewers. Bouncer uses their rooms as reference points: for everyone in this room it checks whether they overlap with a blacklisted streamer, and flags them if so.</p>
+<p>The blacklist holds <b>other streamers</b>, not viewers. Rat Trap uses their rooms as reference points: for everyone in this room it checks whether they overlap with a blacklisted streamer, and flags them if so.</p>
 <p>It belongs to <b>this room only</b>. Each room you monitor has its own blacklist.</p>
-<p><b>Setup:</b> add the other streamer as a room in the Rooms list <i>and</i> put them on this room's blacklist. Bouncer can only learn who is in their room, and who follows them, by sitting in that room while they are live.</p>
+<p><b>Setup:</b> add the other streamer as a room in the Rooms list <i>and</i> put them on this room's blacklist. Rat Trap can only learn who is in their room, and who follows them, by sitting in that room while they are live.</p>
 <p>A viewer here is flagged when any of these is true:</p>
 <ul>
   <li><b>In their room right now.</b> Both rooms are open and the same account is present in both. Fires whichever room they enter second.</li>
-  <li><b>Follows them.</b> TikTok reports, inside the streamer's own room, whether each viewer follows that host. Bouncer remembers it, so this keeps working on later days even when the streamer is offline.</li>
+  <li><b>Follows them.</b> TikTok reports, inside the streamer's own room, whether each viewer follows that host. Rat Trap remembers it, so this keeps working on later days even when the streamer is offline.</li>
   <li><b>Seen in their room before.</b> The account appears in that room's history from an earlier day.</li>
 </ul>
 <p>A hit adds points to the burner score, fires an alert on join, and tags the viewer <code>NOW:@name</code> or <code>BL:@name</code> in the tables and the detail drawer.</p>
 <div class="example"><b>Example.</b> You monitor <code>@alice</code> and <code>@bob</code>. Add <code>@bob</code> to <code>@alice</code>'s blacklist. When someone who follows <code>@bob</code>, or who is sitting in <code>@bob</code>'s room, joins <code>@alice</code>'s room, you get an alert in <code>@alice</code>'s room.</div>
-<p>Bouncer never reads anyone's following list. It only learns follows from the blacklisted streamer's own room.</p>`,
+<p>Rat Trap never reads anyone's following list. It only learns follows from the blacklisted streamer's own room.</p>`,
   },
   watch: {
     title: 'Watch list: viewers you want to keep an eye on',
@@ -432,7 +432,7 @@ for (const [form, list] of [['#add-blacklist', 'blacklist'], ['#add-watch', 'wat
     e.preventDefault(); const input = e.target.querySelector('input'); const name = input.value.trim(); if (!name || !state.current) return;
     try { await api.editList(state.current, list, 'add', [name]); input.value = ''; await loadConfig(); scheduleRefresh(); }
     catch (err) { toast('Could not update list', err.message, 'error'); }
-    if (list === 'blacklist' && !state.rooms.some(r => r.room === name.replace(/^@/, '').toLowerCase())) toast('Blacklisted', `Add @${name.replace(/^@/, '')} as a room too, so Bouncer can record who follows them.`, '', 10000);
+    if (list === 'blacklist' && !state.rooms.some(r => r.room === name.replace(/^@/, '').toLowerCase())) toast('Blacklisted', `Add @${name.replace(/^@/, '')} as a room too, so Rat Trap can record who follows them.`, '', 10000);
   });
 }
 document.addEventListener('click', async e => {

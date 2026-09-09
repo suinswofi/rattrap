@@ -1,4 +1,4 @@
-// Monitor: everything Bouncer knows about one TikTok LIVE room, with no user interface attached.
+// Monitor: everything TikTok Rat Trap knows about one TikTok LIVE room, with no user interface attached.
 //
 // Owns the connection, the day tracker, the long-term history, scoring, and saving. Emits:
 //   'status'  { room, state, message }        state: connecting | live | waiting | reconnecting | offline | stopped
@@ -12,7 +12,7 @@
 // left in between) or after the idle timeout with no activity. Leave time = last time seen.
 // In busy rooms TikTok samples join/like events, so not every viewer will appear.
 // On connect TikTok hands over a backlog of recent events; those are processed too, stamped with
-// TikTok's own timestamps, so people who arrived shortly before Bouncer connected are picked up.
+// TikTok's own timestamps, so people who arrived shortly before we connected are picked up.
 
 import { EventEmitter } from 'node:events';
 import { readFileSync, writeFileSync, appendFileSync, mkdirSync, existsSync } from 'node:fs';
@@ -243,7 +243,7 @@ export class Monitor extends EventEmitter {
       const wasPresent = this.tracker.users.get(w.username)?.present;
       const u = this.tracker.join(w.username, w.info, t);
       if (typeof d.memberCount === 'number' && d.memberCount > 0) this.room.viewers = d.memberCount;
-      const late = this.backlog ? ' (before Bouncer connected)' : '';
+      const late = this.backlog ? ' (before Rat Trap connected)' : '';
       this._log(wasPresent ? 'rejoin' : 'join', `${wasPresent ? 're-joined' : 'joined'}${late}`, u, { t, backlog: this.backlog });
       this._maybeFlag(u);
       this._changed();

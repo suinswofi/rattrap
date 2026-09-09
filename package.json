@@ -1,9 +1,9 @@
 {
-  "name": "bouncer",
+  "name": "rattrap",
   "version": "1.0.2",
   "description": "TikTok LIVE room monitor that remembers viewers across streams and flags likely burner accounts",
   "author": "Consty",
-  "homepage": "https://github.com/suinswofi/bouncer",
+  "homepage": "https://github.com/suinswofi/rattrap",
   "private": true,
   "type": "module",
   "main": "main.js",
@@ -25,8 +25,8 @@
     "electron-builder": "^26.15.3"
   },
   "build": {
-    "appId": "com.consty.bouncer",
-    "productName": "Bouncer",
+    "appId": "com.consty.tiktokrattrap",
+    "productName": "TikTok Rat Trap",
     "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
     "directories": {
       "output": "dist",
@@ -68,7 +68,7 @@
     "publish": {
       "provider": "github",
       "owner": "suinswofi",
-      "repo": "bouncer",
+      "repo": "rattrap",
       "releaseType": "release"
     }
   }

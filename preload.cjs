@@ -1,7 +1,7 @@
 // Bridge between the sandboxed renderer and the main process. Only these calls exist.
 const { contextBridge, ipcRenderer } = require('electron');
 
-contextBridge.exposeInMainWorld('bouncer', {
+contextBridge.exposeInMainWorld('rattrap', {
   getConfig: () => ipcRenderer.invoke('config:get'),
   setConfig: patch => ipcRenderer.invoke('config:set', patch),
   rooms: () => ipcRenderer.invoke('rooms:list'),
@@ -21,7 +21,7 @@ contextBridge.exposeInMainWorld('bouncer', {
   openExternal: url => ipcRenderer.invoke('open:external', url),
   onEvent: cb => {
     const handler = (_event, payload) => cb(payload);
-    ipcRenderer.on('bouncer:event', handler);
-    return () => ipcRenderer.removeListener('bouncer:event', handler);
+    ipcRenderer.on('rattrap:event', handler);
+    return () => ipcRenderer.removeListener('rattrap:event', handler);
   },
 });

@@ -34,7 +34,7 @@ test('who() maps the v2 user shape', () => {
 });
 
 test('monitor tracks events, flags burners, and saves history', async () => {
-  const dir = mkdtempSync(join(tmpdir(), 'bouncer-'));
+  const dir = mkdtempSync(join(tmpdir(), 'rattrap-'));
   try {
     const conn = new FakeConnection();
     const cfg = cfgFor(dir);
@@ -87,7 +87,7 @@ test('monitor tracks events, flags burners, and saves history', async () => {
 });
 
 test('monitor cross-references a blacklisted room and reconnects after a drop', async () => {
-  const dir = mkdtempSync(join(tmpdir(), 'bouncer-'));
+  const dir = mkdtempSync(join(tmpdir(), 'rattrap-'));
   try {
     const cfg = cfgFor(dir);
     // 1. sit in the blacklisted streamer's room and record a follower
@@ -121,7 +121,7 @@ test('monitor cross-references a blacklisted room and reconnects after a drop', 
 });
 
 test('watch list and blacklist are per room; legacy global lists migrate', async () => {
-  const dir = mkdtempSync(join(tmpdir(), 'bouncer-'));
+  const dir = mkdtempSync(join(tmpdir(), 'rattrap-'));
   try {
     const cfg = cfgFor(dir);
     const badConn = new FakeConnection();
@@ -167,7 +167,7 @@ test('watch list and blacklist are per room; legacy global lists migrate', async
 });
 
 test('a viewer in two monitored rooms at once is flagged both ways', async () => {
-  const dir = mkdtempSync(join(tmpdir(), 'bouncer-'));
+  const dir = mkdtempSync(join(tmpdir(), 'rattrap-'));
   try {
     const cfg = cfgFor(dir);
     const all = new Map();
@@ -205,7 +205,7 @@ test('a viewer in two monitored rooms at once is flagged both ways', async () =>
 });
 
 test('the pre-connection backlog is replayed with TikTok timestamps', async () => {
-  const dir = mkdtempSync(join(tmpdir(), 'bouncer-'));
+  const dir = mkdtempSync(join(tmpdir(), 'rattrap-'));
   try {
     const now = Date.now();
     const early = { ...user('early_bird', { nickname: 'Early' }), common: { createTime: String(now - 5 * 60_000) } };
@@ -222,7 +222,7 @@ test('the pre-connection backlog is replayed with TikTok timestamps', async () =
     assert.equal(u.chats, 1);
     const joinLine = m.logLines.find(l => l.kind === 'join' && l.user === 'early_bird');
     assert.ok(joinLine.backlog);
-    assert.ok(joinLine.text.includes('before Bouncer connected'));
+    assert.ok(joinLine.text.includes('before Rat Trap connected'));
     assert.ok(Math.abs(joinLine.t - (now - 5 * 60_000)) < 1000);
     assert.ok(Math.abs(m.tracker.get('bogus_time').firstSeen - now) < 1000, 'absurd timestamps fall back to now');
     // a live event after connect is not marked as backlog
@@ -235,7 +235,7 @@ test('the pre-connection backlog is replayed with TikTok timestamps', async () =
 });
 
 test('pinning and dismissing shape the suspects list', async () => {
-  const dir = mkdtempSync(join(tmpdir(), 'bouncer-'));
+  const dir = mkdtempSync(join(tmpdir(), 'rattrap-'));
   try {
     const cfg = cfgFor(dir);
     const conn = new FakeConnection();
@@ -272,7 +272,7 @@ test('pinning and dismissing shape the suspects list', async () => {
 });
 
 test('chat and event log can be appended to per-room text files', async () => {
-  const dir = mkdtempSync(join(tmpdir(), 'bouncer-'));
+  const dir = mkdtempSync(join(tmpdir(), 'rattrap-'));
   try {
     const cfg = normalizeConfig({ ...DEFAULTS, dataDir: dir, autosaveMinutes: 0, chatToFile: true, eventsToFile: true }, null);
     const conn = new FakeConnection();
@@ -297,7 +297,7 @@ test('chat and event log can be appended to per-room text files', async () => {
 });
 
 test('old accounts are pruned from history when enabled, except pinned and watched', async () => {
-  const dir = mkdtempSync(join(tmpdir(), 'bouncer-'));
+  const dir = mkdtempSync(join(tmpdir(), 'rattrap-'));
   try {
     const now = Date.now();
     const seed = new Monitor('host', normalizeConfig({ ...DEFAULTS, dataDir: dir, autosaveMinutes: 0 }, null), { createConnection: () => new FakeConnection() });

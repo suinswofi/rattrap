@@ -1,4 +1,4 @@
-# Builds Bouncer for Linux (AppImage) and Windows (installer + portable).
+# Builds TikTok Rat Trap for Linux (AppImage) and Windows (installer + portable).
 # Runs on every push to main and on manual dispatch; a tag like v1.2.3 also publishes a GitHub release.
 name: build
 
@@ -37,7 +37,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: actions/upload-artifact@v4
         with:
-          name: bouncer-${{ runner.os }}
+          name: rattrap-${{ runner.os }}
           path: |
             dist/*.AppImage
             dist/*.exe

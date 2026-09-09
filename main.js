@@ -1,4 +1,4 @@
-// Bouncer — Electron main process. Owns the room monitors and config.json; the renderer talks to
+// TikTok Rat Trap — Electron main process. Owns the room monitors and config.json; the renderer talks to
 // it only through the IPC channels exposed in preload.cjs.
 
 import { app, BrowserWindow, ipcMain, shell, dialog } from 'electron';
@@ -18,14 +18,14 @@ try {
   fileCfg = readConfigFile(CONFIG_FILE);
   cfg = normalizeConfig({ ...fileCfg }, APP_DIR);
 } catch (e) {
-  app.whenReady().then(() => { dialog.showErrorBox('Bouncer', `Could not read ${CONFIG_FILE}:\n${e.message}`); app.quit(); });
+  app.whenReady().then(() => { dialog.showErrorBox('TikTok Rat Trap', `Could not read ${CONFIG_FILE}:\n${e.message}`); app.quit(); });
 }
 
 const monitors = new Map(); // room -> Monitor
 const persistedRooms = new Set(); // rooms remembered in config.json (command-line rooms are session-only)
 let win = null;
 
-const send = payload => { if (win && !win.isDestroyed()) win.webContents.send('bouncer:event', payload); };
+const send = payload => { if (win && !win.isDestroyed()) win.webContents.send('rattrap:event', payload); };
 
 function saveConfig() {
   const out = { ...configToJSON(cfg), dataDir: fileCfg.dataDir, rooms: [...persistedRooms].filter(r => monitors.has(r)) };
@@ -117,23 +117,23 @@ ipcMain.handle('open:external', (_e, url) => {
 function createWindow() {
   win = new BrowserWindow({
     width: 1360, height: 860, minWidth: 900, minHeight: 600,
-    backgroundColor: '#0e0e10', title: 'Bouncer', autoHideMenuBar: true,
+    backgroundColor: '#0e0e10', title: 'TikTok Rat Trap', icon: join(HERE, 'build', 'icon.png'), autoHideMenuBar: true,
     webPreferences: { preload: join(HERE, 'preload.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false },
   });
   win.loadFile(join(HERE, 'renderer', 'index.html'));
   win.webContents.setWindowOpenHandler(({ url }) => { if (/^https:\/\/(www\.)?tiktok\.com\//.test(url)) shell.openExternal(url); return { action: 'deny' }; });
   win.on('closed', () => { win = null; });
 
-  // Development aid: BOUNCER_SCREENSHOT=/path/out.png captures the window after a few seconds and quits.
-  if (process.env.BOUNCER_SCREENSHOT) {
+  // Development aid: RATTRAP_SCREENSHOT=/path/out.png captures the window after a few seconds and quits.
+  if (process.env.RATTRAP_SCREENSHOT) {
     win.webContents.once('did-finish-load', () => setTimeout(async () => {
       try {
-        if (process.env.BOUNCER_SCREENSHOT_JS) { await win.webContents.executeJavaScript(process.env.BOUNCER_SCREENSHOT_JS); await new Promise(r => setTimeout(r, 800)); }
-        const img = await win.webContents.capturePage(); writeFileSync(process.env.BOUNCER_SCREENSHOT, img.toPNG());
+        if (process.env.RATTRAP_SCREENSHOT_JS) { await win.webContents.executeJavaScript(process.env.RATTRAP_SCREENSHOT_JS); await new Promise(r => setTimeout(r, 800)); }
+        const img = await win.webContents.capturePage(); writeFileSync(process.env.RATTRAP_SCREENSHOT, img.toPNG());
       }
       catch (e) { console.error('screenshot failed:', e.message); }
       app.quit();
-    }, Number(process.env.BOUNCER_SCREENSHOT_DELAY) || 4000));
+    }, Number(process.env.RATTRAP_SCREENSHOT_DELAY) || 4000));
   }
 }
 
