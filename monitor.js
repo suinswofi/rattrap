@@ -94,6 +94,19 @@ export function configToJSON(cfg) {
 }
 
 const pad2 = n => String(n).padStart(2, '0');
+/**
+ * When the current stream started, in ms, from TikTok's room info (`create_time`/`start_time`, unix seconds
+ * or ms). Returns null when absent or implausible (in the future, or more than 3 days before `now`).
+ */
+export function streamStart(info, now = Date.now()) {
+  for (const k of ['create_time', 'start_time']) {
+    let t = Number(info?.[k]);
+    if (!Number.isFinite(t) || t <= 0) continue;
+    if (t < 1e12) t *= 1000; // seconds -> ms
+    if (t <= now && now - t <= 3 * 24 * 60 * 60_000) return t;
+  }
+  return null;
+}
 const dateOf = ts => { const d = new Date(ts); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; };
 const stamp = ts => { const d = new Date(ts); return `${dateOf(ts)} ${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`; };
 
@@ -119,7 +132,7 @@ export class Monitor extends EventEmitter {
     this.tracker = new ViewerTracker({ timeoutMs: cfg.idleTimeoutMinutes * 60_000, chatHistory: cfg.chatHistory });
     this.history = new RoomHistory(this.username, historyFile(cfg.dataDir, this.username));
     this.roomIndex = loadRoomIndex(cfg.dataDir, this.username);
-    this.room = { id: null, title: null, viewers: null, totalViewers: null, likes: null, live: false, connectedAt: null };
+    this.room = { id: null, title: null, viewers: null, totalViewers: null, likes: null, live: false, connectedAt: null, streamStartedAt: null };
     this.recentChat = [];   // { t, user, nickname, text }
     this.logLines = [];     // last N log entries
     this.flagged = new Map(); // username -> { t, score, reasons, blacklisted }
@@ -127,6 +140,7 @@ export class Monitor extends EventEmitter {
     this.stateMessage = '';
     this.startedAt = null;
     this.sessionDate = null;
+    this.lastRoomId = null; // room id of the last stream we connected to (uptime survives reconnects to it)
     this.conn = null;
     this.backlog = false; // true while the initial (pre-connection) batch is being replayed
     this.quitting = false;
@@ -173,7 +187,7 @@ export class Monitor extends EventEmitter {
     this.timers = [];
     try { if (this.tracker.users.size) this.save(); } catch (e) { this._log('error', `save failed: ${e.message}`); }
     try { this.conn?.disconnect(); } catch { /* ignore */ }
-    this.room.live = false;
+    this.room.live = false; this.room.streamStartedAt = null;
     this._setState('stopped', 'stopped');
   }
 
@@ -195,12 +209,18 @@ export class Monitor extends EventEmitter {
       this.room.id = state?.roomId ?? null; this.room.live = true; this.room.connectedAt = Date.now();
       const info = state?.roomInfo?.data ?? state?.roomInfo ?? {};
       this.room.title = info.title ?? null;
+      // Stream uptime: TikTok's room info carries the room's creation time (unix seconds); fall back to
+      // when we connected. Kept across reconnects to the same room so a dropped socket doesn't reset it.
+      const started = streamStart(info, this.room.connectedAt);
+      if (started || this.room.id !== this.lastRoomId) this.room.streamStartedAt = started ?? this.room.connectedAt;
+      this.lastRoomId = this.room.id;
       if (info.user_count) this.room.viewers = Number(info.user_count);
       this._setState('live', `connected${this.room.title ? ` — "${this.room.title}"` : ''}`);
     } catch (err) {
       this.room.live = false;
       if (this.quitting) return;
       if (err instanceof UserOfflineError || /offline|not.*live/i.test(err?.message ?? '')) {
+        this.room.streamStartedAt = null;
         if (!this.cfg.reconnectWhenLive) { this._setState('offline', 'not live'); return; }
         this._setState('waiting', `not live, checking every ${this.cfg.livePollSeconds}s`);
         try { await this.conn.waitUntilLive(this.cfg.livePollSeconds); }
@@ -304,7 +324,7 @@ export class Monitor extends EventEmitter {
       for (const r of d.ranks ?? []) { const w = who(r); if (w) this.tracker.activity(w.username, w.info, null, {}, t); }
     });
     conn.on(WebcastEvent.STREAM_END, () => {
-      this.room.live = false;
+      this.room.live = false; this.room.streamStartedAt = null;
       this.tracker.clearPresence();
       try { this.save(); } catch (e) { this._log('error', `save failed: ${e.message}`); }
       this._setState('waiting', 'stream ended, everyone marked as left');
@@ -486,7 +506,7 @@ export class Monitor extends EventEmitter {
     const users = this.rows(now);
     return {
       room: this.username, state: this.state, stateMessage: this.stateMessage, ...this.room,
-      startedAt: this.startedAt, sessionDate: this.sessionDate, uptime: this.startedAt ? now - this.startedAt : 0,
+      startedAt: this.startedAt, sessionDate: this.sessionDate, uptime: this.room.live && this.room.streamStartedAt ? Math.max(0, now - this.room.streamStartedAt) : 0,
       counts: { seen: users.length, present: users.filter(u => u.present).length, chatted: users.filter(u => u.chats).length, gifted: users.filter(u => u.gifts).length, flagged: this.flagged.size, known: this.history.users.size },
       otherRooms: this.roomIndex.rooms,
       users,

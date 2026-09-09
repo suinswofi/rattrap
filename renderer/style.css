@@ -55,8 +55,13 @@ a { color: var(--purple-light); }
 .side-list .sub { font-size: 11px; color: var(--dim); }
 .side-list .x { background: none; border: 0; color: var(--dim); padding: 0 4px; font-size: 14px; line-height: 1; border-radius: 3px; }
 .side-list .x:hover { color: var(--text); background: var(--border-strong); }
-.side-list.chips li { cursor: default; padding: 4px 8px; }
+.side-list.chips li { cursor: default; padding: 4px 8px; flex-wrap: wrap; }
+.side-list.chips .tagrow { flex-basis: 100%; order: 3; margin-top: -2px; }
 .side-list.chips .name { color: var(--text); }
+.side-list.chips .tag { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .3px; padding: 1px 6px; border-radius: 3px; border: 0; cursor: pointer; white-space: nowrap; }
+.side-list.chips .tag.warn { background: var(--warn); color: #0e0e10; }
+.side-list.chips .tag.warn:hover { filter: brightness(1.1); }
+.side-list.chips .tag:disabled { opacity: .5; cursor: default; }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--dim); flex: none; }
 .dot.live { background: var(--live); box-shadow: 0 0 0 3px rgba(235, 4, 0, .2); }
 .dot.connecting, .dot.reconnecting { background: var(--purple); animation: pulse 1.2s infinite; }
@@ -251,6 +256,8 @@ td .flag { display: inline-block; font-size: 10px; font-weight: 700; padding: 1p
 .toast span { color: var(--muted); font-size: 12px; }
 .toast em { display: block; margin-top: 4px; font-style: normal; font-size: 11px; color: var(--purple-light); }
 .toast.clickable:hover { border-color: var(--purple); background: var(--hover); }
+.toast .act { display: block; margin-top: 6px; padding: 4px 10px; font-size: 12px; font-weight: 600; border: 0; border-radius: 4px; background: var(--purple); color: #fff; cursor: pointer; }
+.toast .act:hover { filter: brightness(1.1); }
 @keyframes flash { 0%, 60% { box-shadow: inset 0 0 0 2px var(--purple), 0 0 0 4px var(--purple-dim); } 100% { box-shadow: none; } }
 .card.highlight { animation: flash 2.5s ease-out; }
 tbody tr.highlight td { animation: rowflash 2.5s ease-out; }

@@ -24,13 +24,25 @@ const scoreClass = s => s >= (state.config?.burnerAlertScore ?? 6) ? 'high' : s 
 const reasonClass = r => /blacklisted|right now|previously named|no followers|only \d+ followers/.test(r) ? 'strong' : /private|username|nickname|follows nobody/.test(r) ? 'profile' : '';
 
 // `target` = { room, user }: clicking the toast jumps to that account's card on the Suspects tab.
-function toast(title, text, kind = '', ttl = 8000, target = null) {
+/** `action` = { label, run } adds a button to the toast; clicking it runs `run` and closes the toast. */
+function toast(title, text, kind = '', ttl = 8000, target = null, action = null) {
   const el = document.createElement('div');
   el.className = `toast ${kind} ${target ? 'clickable' : ''}`;
-  el.innerHTML = `<b>${esc(title)}</b><span>${esc(text)}</span>${target ? '<em>click to open</em>' : ''}`;
-  el.onclick = () => { el.remove(); if (target) goToUser(target.room, target.user); };
+  el.innerHTML = `<b>${esc(title)}</b><span>${esc(text)}</span>${target ? '<em>click to open</em>' : ''}${action ? `<button class="act">${esc(action.label)}</button>` : ''}`;
+  el.onclick = e => {
+    if (e.target.closest('button.act')) { el.remove(); action.run(); return; }
+    el.remove(); if (target) goToUser(target.room, target.user);
+  };
   $('#toasts').appendChild(el);
   setTimeout(() => el.remove(), ttl);
+}
+
+const isMonitored = name => state.rooms.some(r => r.room === String(name).replace(/^@/, '').toLowerCase());
+
+/** Add a room from a blacklist prompt without leaving the room the user is looking at. */
+async function addBlacklistedRoom(name) {
+  try { await api.addRoom(name); await refreshRooms(); toast('Room added', `Now sitting in @${name}'s room whenever they are live.`, 'ok'); }
+  catch (err) { toast('Could not add room', err.message, 'error'); }
 }
 
 /** Show one account: switch room and tab, undo anything hiding it, scroll to it, flash it, open the drawer. */
@@ -80,7 +92,10 @@ const roomLists = room => state.config?.lists?.[room] ?? { watch: [], blacklist:
 
 function renderLists() {
   const l = roomLists(state.current);
-  const chips = (list, name) => list.map(n => `<li><span class="name">@${esc(n)}</span><button class="x" data-list="${name}" data-name="${esc(n)}" title="remove">×</button></li>`).join('');
+  // Blacklisted streamers only work as reference points while their room is monitored too; say so on the chip.
+  const tag = (list, n) => list === 'blacklist' && !isMonitored(n)
+    ? `<span class="tagrow"><button class="tag warn" data-add-room="${esc(n)}" title="Rat Trap is not sitting in @${esc(n)}'s room, so it cannot learn who follows them. Click to add them as a room.">not monitored · add room</button></span>` : '';
+  const chips = (list, name) => list.map(n => `<li><span class="name">@${esc(n)}</span>${tag(name, n)}<button class="x" data-list="${name}" data-name="${esc(n)}" title="remove">×</button></li>`).join('');
   $('#blacklist').innerHTML = chips(l.blacklist, 'blacklist') || (state.current ? '' : '<li class="sub">select a room</li>');
   $('#watchlist').innerHTML = chips(l.watch, 'watch') || (state.current ? '' : '<li class="sub">select a room</li>');
   for (const id of ['#blacklist-room', '#watchlist-room']) $(id).textContent = state.current ? `· @${state.current}` : '';
@@ -102,7 +117,7 @@ function renderHeader() {
     parts.push(`<span><b>${s.counts.present}</b> present</span>`, `<span><b>${s.counts.seen}</b> seen today</span>`, `<span><b>${s.counts.known}</b> ever</span>`);
     if (s.counts.flagged) parts.push(`<span><b class="hot">${s.counts.flagged}</b> flagged</span>`);
     if (s.likes != null) parts.push(`<span><b>${num(s.likes)}</b> likes</span>`);
-    if (s.uptime) parts.push(`<span>up <b>${dur(s.uptime)}</b></span>`);
+    if (s.uptime) parts.push(`<span title="how long the streamer has been live">live <b>${dur(s.uptime)}</b></span>`);
     if (s.title) parts.push(`<span class="title" title="${esc(s.title)}">“${esc(s.title)}”</span>`);
   }
   $('#room-meta').innerHTML = parts.join('');
@@ -389,7 +404,7 @@ async function refreshRooms() {
   state.rooms = await api.rooms();
   if (state.current && !state.rooms.some(r => r.room === state.current)) state.current = null;
   if (!state.current && state.rooms.length) await selectRoom(state.rooms[0].room);
-  renderRooms(); renderHeader();
+  renderRooms(); renderHeader(); renderLists();
 }
 
 async function refreshSnapshot() {
@@ -435,7 +450,7 @@ api.onEvent(ev => {
       if (ev.room === state.current) scheduleRefresh();
       break;
     case 'status': case 'rooms':
-      state.rooms = ev.rooms ?? state.rooms; renderRooms(); renderHeader();
+      state.rooms = ev.rooms ?? state.rooms; renderRooms(); renderHeader(); renderLists();
       if (ev.type === 'status' && ev.room === state.current) scheduleRefresh();
       if (!state.current && state.rooms.length) selectRoom(state.rooms[0].room);
       break;
@@ -452,7 +467,7 @@ const HELP = {
     body: `
 <p>The blacklist holds <b>other streamers</b>, not viewers. Rat Trap uses their rooms as reference points: for everyone in this room it checks whether they overlap with a blacklisted streamer, and flags them if so.</p>
 <p>It belongs to <b>this room only</b>. Each room you monitor has its own blacklist.</p>
-<p><b>Setup:</b> add the other streamer as a room in the Rooms list <i>and</i> put them on this room's blacklist. Rat Trap can only learn who is in their room, and who follows them, by sitting in that room while they are live.</p>
+<p><b>Setup:</b> add the other streamer as a room in the Rooms list <i>and</i> put them on this room's blacklist. Rat Trap can only learn who is in their room, and who follows them, by sitting in that room while they are live. A blacklist entry whose room is not in the Rooms list shows a <b>not monitored</b> tag; click it to add the room.</p>
 <p>A viewer here is flagged when any of these is true:</p>
 <ul>
   <li><b>In their room right now.</b> Both rooms are open and the same account is present in both. Fires whichever room they enter second.</li>
@@ -502,12 +517,15 @@ for (const [form, list] of [['#add-blacklist', 'blacklist'], ['#add-watch', 'wat
     e.preventDefault(); const input = e.target.querySelector('input'); const name = input.value.trim(); if (!name || !state.current) return;
     try { await api.editList(state.current, list, 'add', [name]); input.value = ''; await loadConfig(); scheduleRefresh(); }
     catch (err) { toast('Could not update list', err.message, 'error'); }
-    if (list === 'blacklist' && !state.rooms.some(r => r.room === name.replace(/^@/, '').toLowerCase())) toast('Blacklisted', `Add @${name.replace(/^@/, '')} as a room too, so Rat Trap can record who follows them.`, '', 10000);
+    const clean = name.replace(/^@/, '').toLowerCase();
+    if (list === 'blacklist' && !isMonitored(clean)) toast('Blacklisted, but not monitored', `Rat Trap can only learn who follows @${clean} by sitting in their room. Add them as a room too.`, '', 15000, null, { label: `Add @${clean} as a room`, run: () => addBlacklistedRoom(clean) });
   });
 }
 document.addEventListener('click', async e => {
   const x = e.target.closest('button.x[data-list]');
   if (x) { await api.editList(state.current, x.dataset.list, 'remove', [x.dataset.name]); await loadConfig(); scheduleRefresh(); return; }
+  const add = e.target.closest('button[data-add-room]');
+  if (add) { add.disabled = true; await addBlacklistedRoom(add.dataset.addRoom); return; }
   const row = e.target.closest('[data-user]');
   if (row && !e.target.closest('.side-list') && !e.target.closest('button[data-action]')) openDetail(row.dataset.user);
 });

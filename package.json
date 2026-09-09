@@ -1,6 +1,6 @@
 {
   "name": "rattrap",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "description": "TikTok LIVE room monitor that remembers viewers across streams and flags likely burner accounts",
   "author": "Consty",
   "homepage": "https://github.com/suinswofi/rattrap",

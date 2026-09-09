@@ -352,3 +352,42 @@ test('today\'s list is capped at maxUsers, trimming the oldest that left', async
     m.stop();
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('uptime follows the stream, not the app', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'rattrap-'));
+  try {
+    const startedSec = Math.floor(Date.now() / 1000) - 2 * 3600; // TikTok reports create_time in unix seconds
+    class Conn extends FakeConnection {
+      async connect() { this.connected = true; return { roomId: 'r9', roomInfo: { data: { title: 't', create_time: startedSec } } }; }
+    }
+    const conn = new Conn();
+    const cfg = { ...cfgFor(dir), reconnectWhenLive: false };
+    const m = new Monitor('host', cfg, { createConnection: () => conn });
+    assert.equal(m.snapshot().uptime, 0, 'nothing before connecting');
+    m.start(); await tick();
+    const up = m.snapshot().uptime;
+    assert.ok(up >= 2 * 3600_000 && up < 2 * 3600_000 + 60_000, `uptime from create_time, got ${up}`);
+    conn.emit(WebcastEvent.STREAM_END, {});
+    assert.equal(m.snapshot().uptime, 0, 'reset when the stream ends');
+    m.stop();
+
+    // no timestamp from TikTok: fall back to when we connected
+    const plain = new FakeConnection();
+    const m2 = new Monitor('host2', cfg, { createConnection: () => plain });
+    m2.start(); await tick();
+    assert.ok(m2.snapshot().uptime >= 0 && m2.snapshot().uptime < 5_000);
+    assert.equal(m2.room.streamStartedAt, m2.room.connectedAt);
+    m2.stop();
+    assert.equal(m2.snapshot().uptime, 0);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('streamStart() parses seconds and ms and rejects implausible values', async () => {
+  const { streamStart } = await import('./monitor.js');
+  const now = 1_700_000_000_000;
+  assert.equal(streamStart({ create_time: 1_699_999_000 }, now), 1_699_999_000_000);
+  assert.equal(streamStart({ start_time: 1_699_999_000_000 }, now), 1_699_999_000_000);
+  assert.equal(streamStart({ create_time: now / 1000 + 60 }, now), null, 'future');
+  assert.equal(streamStart({ create_time: 1_600_000_000 }, now), null, 'years ago = account age, not stream');
+  assert.equal(streamStart({}, now), null);
+});
