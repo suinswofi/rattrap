@@ -69,7 +69,8 @@
     "publish": {
       "provider": "github",
       "owner": "suinswofi",
-      "repo": "bouncer"
+      "repo": "bouncer",
+      "releaseType": "release"
     }
   }
 }
