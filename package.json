@@ -1,0 +1,75 @@
+{
+  "name": "bouncer",
+  "version": "1.0.0",
+  "description": "TikTok LIVE room monitor that remembers viewers across streams and flags likely burner accounts",
+  "author": "Consty",
+  "homepage": "https://github.com/suinswofi/bouncer",
+  "private": true,
+  "type": "module",
+  "main": "main.js",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "electron .",
+    "cli": "node viewers.mjs",
+    "test": "node --test",
+    "dist": "electron-builder --linux --win",
+    "dist:linux": "electron-builder --linux",
+    "dist:win": "electron-builder --win"
+  },
+  "dependencies": {
+    "tiktok-live-connector": "^2"
+  },
+  "devDependencies": {
+    "electron": "^44.3.0",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "com.consty.bouncer",
+    "productName": "Bouncer",
+    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.js",
+      "preload.cjs",
+      "monitor.js",
+      "tracker.js",
+      "history.js",
+      "burner.js",
+      "renderer/**/*",
+      "package.json"
+    ],
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "Utility",
+      "icon": "build/icon.png",
+      "synopsis": "TikTok LIVE room monitor that flags likely burner accounts"
+    },
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ],
+      "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "${productName}-${version}-setup.${ext}"
+    },
+    "portable": {
+      "artifactName": "${productName}-${version}-portable.${ext}"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "suinswofi",
+      "repo": "bouncer"
+    }
+  }
+}

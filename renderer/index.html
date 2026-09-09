@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:;">
+  <title>Bouncer</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+  <aside id="sidebar">
+    <div class="brand"><span class="brand-mark">B</span><span>Bouncer</span></div>
+
+    <section class="side-section">
+      <h3>Rooms</h3>
+      <ul id="room-list" class="side-list"></ul>
+      <form id="add-room" class="side-add"><input placeholder="add @streamer" autocomplete="off" spellcheck="false"><button type="submit" title="Monitor this room">+</button></form>
+    </section>
+
+    <section class="side-section">
+      <h3>Blacklist <span class="hint" title="Streamers whose followers and viewers get flagged. Add their room above too, so Bouncer can record who follows them.">?</span></h3>
+      <ul id="blacklist" class="side-list chips"></ul>
+      <form id="add-blacklist" class="side-add"><input placeholder="add @streamer" autocomplete="off" spellcheck="false"><button type="submit">+</button></form>
+    </section>
+
+    <section class="side-section">
+      <h3>Watch list <span class="hint" title="Viewers whose joins, chats and gifts always pop up as alerts.">?</span></h3>
+      <ul id="watchlist" class="side-list chips"></ul>
+      <form id="add-watch" class="side-add"><input placeholder="add @viewer" autocomplete="off" spellcheck="false"><button type="submit">+</button></form>
+    </section>
+
+    <div class="side-footer">
+      <button id="btn-settings" class="btn">Settings</button>
+      <button id="btn-data" class="btn" title="Open the data folder">Data folder</button>
+    </div>
+  </aside>
+
+  <main id="main">
+    <header id="room-header">
+      <div class="room-title">
+        <span id="room-name">No room</span>
+        <span id="room-status" class="status"></span>
+      </div>
+      <div id="room-meta" class="room-meta"></div>
+      <div class="room-actions">
+        <button id="btn-save" class="btn primary" title="Write today's snapshot and update the room history">Save</button>
+        <button id="btn-reconnect" class="btn">Reconnect</button>
+        <button id="btn-remove" class="btn danger">Remove</button>
+      </div>
+    </header>
+
+    <nav id="tabs">
+      <button class="tab-btn active" data-tab="users">Users <span class="count" id="count-users"></span></button>
+      <button class="tab-btn" data-tab="suspects">Suspects <span class="count" id="count-suspects"></span></button>
+      <button class="tab-btn" data-tab="chat">Chat</button>
+      <button class="tab-btn" data-tab="log">Log</button>
+      <div class="tab-tools">
+        <label class="check" id="present-wrap"><input type="checkbox" id="present-only"> present only</label>
+        <label class="check" id="logchat-wrap" hidden><input type="checkbox" id="log-chat"> show chat</label>
+        <input id="search" type="search" placeholder="search username or nickname" autocomplete="off" spellcheck="false">
+      </div>
+    </nav>
+
+    <section id="content">
+      <div id="tab-users" class="tab">
+        <div class="table-wrap"><table id="users-table"><thead></thead><tbody></tbody></table></div>
+      </div>
+      <div id="tab-suspects" class="tab" hidden>
+        <p class="note">Points are added for each burner-like signal. The score ranks who deserves a look; it proves nothing on its own. In busy rooms most one-time visitors earn a few points just for being new and quiet, so weigh the profile and blacklist reasons more.</p>
+        <div id="suspects-list" class="cards"></div>
+      </div>
+      <div id="tab-chat" class="tab" hidden><div id="chat-list" class="stream"></div></div>
+      <div id="tab-log" class="tab" hidden><div id="log-list" class="stream"></div></div>
+      <div id="empty" class="empty" hidden>
+        <div class="empty-mark">B</div>
+        <p>Add a streamer in the sidebar to start watching their room.</p>
+      </div>
+    </section>
+  </main>
+
+  <aside id="detail" hidden>
+    <div class="detail-head">
+      <div>
+        <div id="detail-name" class="detail-name"></div>
+        <div id="detail-nick" class="detail-nick"></div>
+      </div>
+      <button id="detail-close" class="icon-btn" title="Close">×</button>
+    </div>
+    <div id="detail-body" class="detail-body"></div>
+  </aside>
+</div>
+
+<div id="settings" class="modal" hidden>
+  <div class="dialog">
+    <h2>Settings</h2>
+    <form id="settings-form">
+      <label>Idle timeout (minutes) <input name="idleTimeoutMinutes" type="number" min="1" step="1"></label>
+      <label>Alert at burner score <input name="burnerAlertScore" type="number" min="0" step="1"></label>
+      <label>Autosave every (minutes, 0 = off) <input name="autosaveMinutes" type="number" min="0" step="1"></label>
+      <label>Live check while offline (seconds) <input name="livePollSeconds" type="number" min="30" step="1"></label>
+      <label>Chat messages kept per user <input name="chatHistory" type="number" min="1" step="1"></label>
+      <label>Euler Stream API key (optional) <input name="signApiKey" type="password" autocomplete="off"></label>
+      <label class="check"><input name="reconnectWhenLive" type="checkbox"> wait for offline streamers to go live</label>
+      <label class="check"><input name="resume" type="checkbox"> resume today's snapshot on start</label>
+      <p class="note" id="settings-path"></p>
+      <div class="dialog-actions">
+        <button type="button" class="btn" id="settings-cancel">Cancel</button>
+        <button type="submit" class="btn primary">Save</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div id="toasts"></div>
+<script src="app.js"></script>
+</body>
+</html>

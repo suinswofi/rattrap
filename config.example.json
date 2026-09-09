@@ -1,0 +1,16 @@
+{
+  "username": "the_great_sir_stromburg",
+  "idleTimeoutMinutes": 15,
+  "watch": [],
+  "blacklist": [],
+  "burnerAlertScore": 6,
+  "signApiKey": "",
+  "dataDir": "data",
+  "autosaveMinutes": 5,
+  "resume": true,
+  "reconnectWhenLive": true,
+  "livePollSeconds": 60,
+  "chatHistory": 50,
+  "logEvents": true,
+  "logChat": false
+}
