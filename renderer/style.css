@@ -248,4 +248,10 @@ td .flag { display: inline-block; font-size: 10px; font-weight: 700; padding: 1p
 .toast.error { border-left-color: var(--live); }
 .toast b { display: block; margin-bottom: 2px; }
 .toast span { color: var(--muted); font-size: 12px; }
+.toast em { display: block; margin-top: 4px; font-style: normal; font-size: 11px; color: var(--purple-light); }
+.toast.clickable:hover { border-color: var(--purple); background: var(--hover); }
+@keyframes flash { 0%, 60% { box-shadow: inset 0 0 0 2px var(--purple), 0 0 0 4px var(--purple-dim); } 100% { box-shadow: none; } }
+.card.highlight { animation: flash 2.5s ease-out; }
+tbody tr.highlight td { animation: rowflash 2.5s ease-out; }
+@keyframes rowflash { 0%, 60% { background: var(--purple-dim); } 100% { background: transparent; } }
 @keyframes rise { from { transform: translateY(8px); opacity: 0; } }

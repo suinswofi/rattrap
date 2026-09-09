@@ -23,13 +23,44 @@ const flagClass = f => f.startsWith('BL:') || f.startsWith('NOW:') ? 'bl' : esc(
 const scoreClass = s => s >= (state.config?.burnerAlertScore ?? 6) ? 'high' : s >= 3 ? 'mid' : '';
 const reasonClass = r => /blacklisted|right now|previously named|no followers|only \d+ followers/.test(r) ? 'strong' : /private|username|nickname|follows nobody/.test(r) ? 'profile' : '';
 
-function toast(title, text, kind = '', ttl = 8000) {
+// `target` = { room, user }: clicking the toast jumps to that account's card on the Suspects tab.
+function toast(title, text, kind = '', ttl = 8000, target = null) {
   const el = document.createElement('div');
-  el.className = `toast ${kind}`;
-  el.innerHTML = `<b>${esc(title)}</b><span>${esc(text)}</span>`;
-  el.onclick = () => el.remove();
+  el.className = `toast ${kind} ${target ? 'clickable' : ''}`;
+  el.innerHTML = `<b>${esc(title)}</b><span>${esc(text)}</span>${target ? '<em>click to open</em>' : ''}`;
+  el.onclick = () => { el.remove(); if (target) goToUser(target.room, target.user); };
   $('#toasts').appendChild(el);
   setTimeout(() => el.remove(), ttl);
+}
+
+/** Show one account: switch room and tab, undo anything hiding it, scroll to it, flash it, open the drawer. */
+async function goToUser(room, user) {
+  if (!room || !user) return;
+  if (room !== state.current) {
+    if (!state.rooms.some(r => r.room === room)) await refreshRooms();
+    if (!state.rooms.some(r => r.room === room)) return;
+    await selectRoom(room);
+  }
+  await refreshSnapshot();
+  const u = state.snap?.users.find(x => x.username === user);
+  if (!u) return;
+  state.search = ''; $('#search').value = '';
+  const onSuspects = u.score > 0 || u.pinned;
+  if (onSuspects) {
+    state.suspectFilters.clear();
+    if (u.dismissedAt != null && !state.showDismissed) { state.showDismissed = true; $('#show-dismissed').checked = true; }
+    setTab('suspects');
+  } else {
+    state.presentOnly = false; $('#present-only').checked = false;
+    setTab('users');
+  }
+  await openDetail(user);
+  const el = document.querySelector(onSuspects ? `#suspects-list .card[data-user="${CSS.escape(user)}"]` : `#users-table tbody tr[data-user="${CSS.escape(user)}"]`);
+  if (el) {
+    el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    el.classList.remove('highlight'); void el.offsetWidth; el.classList.add('highlight');
+    setTimeout(() => el.classList.remove('highlight'), 2500);
+  }
 }
 
 // ---------- sidebar ----------
@@ -358,10 +389,10 @@ api.onEvent(ev => {
     case 'log':
       if (ev.room) appendLine(ev.room, ev.entry);
       if (ev.entry.kind === 'error') toast(ev.room ? `@${ev.room}` : 'Rat Trap', ev.entry.text, 'error');
-      else if (ev.entry.watched && ['join', 'rejoin', 'chat', 'gift', 'follow', 'share'].includes(ev.entry.kind)) toast(`★ @${ev.entry.user} in @${ev.room}`, `${ev.entry.kind}: ${ev.entry.text}`);
+      else if (ev.entry.watched && ['join', 'rejoin', 'chat', 'gift', 'follow', 'share'].includes(ev.entry.kind)) toast(`★ @${ev.entry.user} in @${ev.room}`, `${ev.entry.kind}: ${ev.entry.text}`, '', 8000, { room: ev.room, user: ev.entry.user });
       break;
     case 'flag':
-      toast(`⚑ @${ev.user} in @${ev.room} — score ${ev.score}`, ev.reasons.join('; '), 'flag', 12000);
+      toast(`⚑ @${ev.user} in @${ev.room} — score ${ev.score}`, ev.reasons.join('; '), 'flag', 12000, { room: ev.room, user: ev.user });
       if (ev.room === state.current) scheduleRefresh();
       break;
     case 'status': case 'rooms':
