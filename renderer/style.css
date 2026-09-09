@@ -215,11 +215,11 @@ td .flag { display: inline-block; font-size: 10px; font-weight: 700; padding: 1p
 
 /* ---------- modal & toasts ---------- */
 .modal { position: fixed; inset: 0; background: rgba(0, 0, 0, .6); display: grid; place-items: center; z-index: 20; }
-.dialog { width: 460px; background: var(--elevated); border: 1px solid var(--border-strong); border-radius: 8px; padding: 20px 22px; box-shadow: 0 20px 60px rgba(0, 0, 0, .6); }
+.dialog { width: 460px; max-height: 90vh; overflow: auto; background: var(--elevated); border: 1px solid var(--border-strong); border-radius: 8px; padding: 20px 22px; box-shadow: 0 20px 60px rgba(0, 0, 0, .6); }
 .dialog h2 { margin: 0 0 14px; font-size: 16px; }
 .dialog-head { display: flex; justify-content: space-between; align-items: flex-start; }
 .dialog-head h2 { margin-bottom: 8px; }
-.dialog.help { width: 560px; max-height: 80vh; overflow: auto; user-select: text; }
+.dialog.help { width: 560px; user-select: text; }
 .dialog.help p, .dialog.help li { color: var(--muted); line-height: 1.55; }
 .dialog.help p { margin: 8px 0; }
 .dialog.help ul, .dialog.help ol { margin: 6px 0 10px; padding-left: 20px; }
