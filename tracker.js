@@ -28,6 +28,7 @@ export class ViewerTracker {
         chats: 0, likes: 0, gifts: 0, coins: 0, shares: 0, followed: false,
         isAdmin: false, isFollower: null,
         presentMs: 0, sessionStart: null, // time spent in the room (completed visits) and start of the current visit
+        dismissedAt: null, // hidden from the suspects list since this time; a later join clears it
         // profile fields TikTok attaches to events (null = never delivered)
         secUid: null, followers: null, following: null,
         verified: null, privateAccount: null, gifterLevel: null,
@@ -71,6 +72,7 @@ export class ViewerTracker {
   join(username, info, now = Date.now()) {
     const u = this._get(username, info, now);
     if (u.present) this._markLeft(u, u.lastSeen, 'rejoin'); // must have left before re-joining
+    if (u.dismissedAt !== null && now >= u.dismissedAt) u.dismissedAt = null; // back in the room: worth a fresh look
     u.joins++;
     this._touch(u, now);
     return u;

@@ -161,7 +161,7 @@ test('watch list and blacklist are per room; legacy global lists migrate', async
     assert.deepEqual([...roomLists(legacy, 'anyroom').blacklist], ['oldrival']);
     assert.deepEqual([...roomLists(legacy, 'Another').watch], ['old_vip']);
     const json = configToJSON(legacy);
-    assert.deepEqual(json.lists.anyroom, { watch: ['old_vip'], blacklist: ['oldrival'] });
+    assert.deepEqual(json.lists.anyroom, { watch: ['old_vip'], blacklist: ['oldrival'], pinned: [] });
     assert.equal(json.legacyLists, undefined);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
@@ -230,6 +230,68 @@ test('the pre-connection backlog is replayed with TikTok timestamps', async () =
     const live = m.logLines.find(l => l.kind === 'join' && l.user === 'live_one');
     assert.equal(live.backlog, false);
     assert.ok(!live.text.includes('before'));
+    m.stop();
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('pinning and dismissing shape the suspects list', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'bouncer-'));
+  try {
+    const cfg = cfgFor(dir);
+    const conn = new FakeConnection();
+    const m = new Monitor('host', cfg, { createConnection: () => conn });
+    m.start(); await tick();
+    conn.emit(WebcastEvent.MEMBER, user('user1111111111', { nickname: 'user1111111111', followInfo: { followerCount: '0', followingCount: '0', followStatus: '0' } }));
+    conn.emit(WebcastEvent.MEMBER, user('quiet_one'));
+    conn.emit(WebcastEvent.MEMBER, user('harmless', { followInfo: { followerCount: '900', followingCount: '10', followStatus: '1' } }));
+    assert.deepEqual(m.suspects().map(u => u.username), ['user1111111111', 'quiet_one', 'harmless']);
+
+    m.lists.pinned.add('harmless');
+    assert.equal(m.suspects()[0].username, 'harmless'); // pinned sorts first regardless of score
+    assert.equal(m.dismiss(['harmless', 'quiet_one', 'nobody']), 1); // pinned and unknown are skipped
+    assert.deepEqual(m.suspects().map(u => u.username), ['harmless', 'user1111111111']);
+    assert.equal(m.suspects(20, true).length, 3);
+    assert.ok(m.row(m.tracker.get('quiet_one')).dismissedAt > 0);
+
+    conn.emit(WebcastEvent.MEMBER, user('quiet_one')); // joins again: back on the list
+    assert.equal(m.tracker.get('quiet_one').dismissedAt, null);
+    assert.equal(m.suspects().length, 3);
+
+    assert.equal(m.dismiss(['quiet_one']), 1);
+    assert.equal(m.undismiss(['quiet_one']), 1);
+    assert.equal(m.suspects().length, 3);
+
+    m.dismiss(['quiet_one']);
+    m.save(); // dismissal survives a restart the same day
+    const m2 = new Monitor('host', cfg, { createConnection: () => new FakeConnection() });
+    m2.start(); await tick();
+    assert.ok(m2.tracker.get('quiet_one').dismissedAt > 0);
+    assert.deepEqual(configToJSON(cfg).lists.host.pinned, ['harmless']);
+    m.stop(); m2.stop();
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('chat and event log can be appended to per-room text files', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'bouncer-'));
+  try {
+    const cfg = normalizeConfig({ ...DEFAULTS, dataDir: dir, autosaveMinutes: 0, chatToFile: true, eventsToFile: true }, null);
+    const conn = new FakeConnection();
+    const m = new Monitor('host', cfg, { createConnection: () => conn });
+    m.start(); await tick();
+    conn.emit(WebcastEvent.MEMBER, user('talker', { nickname: 'Talky' }));
+    conn.emit(WebcastEvent.CHAT, { ...user('talker', { nickname: 'Talky' }), comment: 'hello "world"' });
+    conn.emit(WebcastEvent.GIFT, { ...user('talker', { nickname: 'Talky' }), gift: { name: 'Rose', diamondCount: 1, type: 0 }, repeatCount: 2, repeatEnd: 1 });
+    const chat = readFileSync(m.chatFile, 'utf8').trim().split('\n');
+    const log = readFileSync(m.eventsFile, 'utf8').trim().split('\n');
+    assert.equal(chat.length, 1);
+    assert.match(chat[0], /^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d  talker \(Talky\): hello "world"$/);
+    assert.ok(log.some(l => /  join     talker \(Talky\)  joined$/.test(l)), log.join('|'));
+    assert.ok(log.some(l => /  gift     talker \(Talky\)  Rose x2 \(2 coins\)$/.test(l)));
+    assert.ok(!log.some(l => l.includes('hello')), 'chat stays out of the event file');
+
+    cfg.chatToFile = false; // toggled off live: nothing more is written
+    conn.emit(WebcastEvent.CHAT, { ...user('talker'), comment: 'again' });
+    assert.equal(readFileSync(m.chatFile, 'utf8').trim().split('\n').length, 1);
     m.stop();
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });

@@ -25,14 +25,19 @@ npm test
 - **Blacklist** and **Watch list** (sidebar): one pair per room, edited in place, saved immediately.
 - **Users** tab: everyone seen today. Click a column to sort, type to search, tick "present only".
   Click a row for the detail drawer.
-- **Suspects** tab: today's users ranked by burner score with the reasons spelled out.
+- **Suspects** tab: today's users ranked by burner score with the reasons spelled out. Tag chips
+  filter the list (flagged, blacklist hits, in another room now, renamed, no followers, watched,
+  pinned…). **Pin** an account to keep it on the list; **Dismiss** hides one until it joins again;
+  **Clear list** dismisses everything shown except pinned accounts. Dismissals last for the day,
+  pins are remembered per room.
 - **Chat** and **Log** tabs: live chat and the join/leave/gift/flag event log.
 - **Detail drawer**: today's activity, TikTok-reported profile (followers, following, verified,
   private, gifter level), the room history (first seen ever, days seen, totals, previous
   usernames), other monitored rooms the account appeared in and whether it follows their host,
   and recent chat. Buttons to watch the account or open it on TikTok.
 - **Toasts** pop up for flagged joins, watched users, saves and errors.
-- **Settings**: idle timeout, alert score, autosave, live polling, Euler Stream API key.
+- **Settings**: idle timeout, alert score, autosave, live polling, Euler Stream API key, and
+  whether to write the chat and/or the event log to text files.
 
 If a streamer is offline the monitor waits and connects when they go live. It reconnects after
 drops, marks everyone as gone when the stream ends, autosaves, and resumes today's snapshot on
@@ -42,9 +47,12 @@ arrival time (their log lines say "before Bouncer connected").
 
 ## What is remembered
 
-Two kinds of files live in `data/`:
+These files live in `data/`:
 
 - **Daily snapshots** `viewers-<room>-<date>.json`: everything seen today, including recent chat.
+- **Chat and event logs** `chat-<room>-<date>.txt` and `log-<room>-<date>.txt`, one line per
+  message or event, written live when the matching option is on in Settings (or `--chat-file`
+  / `--log-file` in the terminal client).
 - **Room history** `history-<room>.json`: one record per account ever seen in that room, keyed by
   TikTok user id, with per-day activity (joins, chats, likes, gifts, coins, shares, time in room),
   first/last seen ever, previous usernames and nicknames, follow status towards the host, and the
@@ -134,7 +142,7 @@ takes the flags shown in brackets.
 | `rooms`              | `[]`                       | rooms the app opens on start; falls back to `username` |
 | `username`           | `the_great_sir_stromburg`  | default room for the terminal client (first argument, or env `TIKTOK_USER`) |
 | `idleTimeoutMinutes` | `15`                       | inactivity after which a viewer is assumed gone (`--timeout`) |
-| `lists`              | `{}`                       | per room: `{ "<room>": { "watch": [...], "blacklist": [...] } }`. Terminal client: `--watch a,b`, `--blacklist a,b` for its room |
+| `lists`              | `{}`                       | per room: `{ "<room>": { "watch": [...], "blacklist": [...], "pinned": [...] } }`. Terminal client: `--watch a,b`, `--blacklist a,b` for its room |
 | `burnerAlertScore`   | `6`                        | score at which a join is announced (`--alert n`) |
 | `signApiKey`         | `""`                       | optional Euler Stream API key for higher connect limits (`--key`, env `EULER_API_KEY`) |
 | `dataDir`            | `data`                     | snapshot and history directory (`--data`) |
@@ -145,6 +153,8 @@ takes the flags shown in brackets.
 | `chatHistory`        | `50`                       | recent chat messages kept per user |
 | `logEvents`          | `true`                     | terminal client: print joins/leaves/gifts (`--quiet` to start off) |
 | `logChat`            | `false`                    | terminal client: also print every chat message (`--chat`) |
+| `chatToFile`         | `false`                    | append every chat message to `data/chat-<room>-<date>.txt` (`--chat-file`) |
+| `eventsToFile`       | `false`                    | append the event log to `data/log-<room>-<date>.txt` (`--log-file`) |
 
 ## Terminal client
 
@@ -153,6 +163,8 @@ takes the flags shown in brackets.
 ```
 list / present / find <text> / show <user> / score <user>
 suspects [n]         today's users ranked by burner score, with reasons
+pin / unpin <user…>  keep accounts on the suspects list when clearing
+dismiss <user…>|all  hide accounts from the suspects list until they join again
 rooms [user]         other rooms with history files; with a user: where else they were seen
 blacklist [add|rm <user…>]
 chat [n] / top [chats|likes|coins|gifts|joins] [n]

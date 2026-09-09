@@ -7,6 +7,7 @@ const api = window.bouncer;
 const state = {
   rooms: [], current: null, snap: null, config: null,
   tab: 'users', sort: { key: 'firstSeen', dir: 1 }, search: '', presentOnly: false, showChat: false,
+  suspectFilters: new Set(), showDismissed: false,
   logs: new Map(), chats: new Map(), detailUser: null, refreshTimer: null,
 };
 
@@ -44,7 +45,7 @@ function renderRooms() {
   $('#empty').hidden = state.rooms.length > 0;
 }
 
-const roomLists = room => state.config?.lists?.[room] ?? { watch: [], blacklist: [] };
+const roomLists = room => state.config?.lists?.[room] ?? { watch: [], blacklist: [], pinned: [] };
 
 function renderLists() {
   const l = roomLists(state.current);
@@ -120,18 +121,76 @@ function renderTable() {
     || `<tr><td colspan="${COLUMNS.length}" class="note">${!state.snap ? 'loading…' : state.snap.users.length ? 'nobody matches' : state.snap.state === 'live' ? 'connected, waiting for viewers…' : 'no viewers seen yet today'}</td></tr>`;
 }
 
-function renderSuspects() {
+// Tag filters for the suspects list: label, and the test a row must pass.
+const SUSPECT_TAGS = [
+  { key: 'flagged', label: 'Flagged', test: u => u.score >= (state.config?.burnerAlertScore ?? 6) },
+  { key: 'blacklist', label: 'Blacklist', test: u => u.blacklisted.length > 0 },
+  { key: 'now', label: 'In room now', test: u => u.flags.some(f => f.startsWith('NOW:')) },
+  { key: 'follows', label: 'Follows blacklisted', test: u => u.reasons.some(r => r.startsWith('follows blacklisted')) },
+  { key: 'renamed', label: 'Renamed', test: u => u.flags.includes('renamed') },
+  { key: 'nofollowers', label: 'No followers', test: u => u.followers === 0 },
+  { key: 'defaultname', label: 'Auto-generated name', test: u => u.reasons.includes('auto-generated username') },
+  { key: 'follower', label: 'Follows this host', test: u => u.isFollower === true },
+  { key: 'watch', label: 'Watched', test: u => u.watched },
+  { key: 'pinned', label: 'Pinned', test: u => u.pinned },
+  { key: 'present', label: 'Present', test: u => u.present },
+];
+
+function suspectRows() {
   const q = state.search.trim().toLowerCase();
-  const list = (state.snap?.users ?? []).filter(u => u.score > 0 && (!q || u.username.toLowerCase().includes(q) || (u.nickname ?? '').toLowerCase().includes(q)))
-    .sort((a, b) => b.score - a.score).slice(0, 200);
-  $('#suspects-list').innerHTML = list.map(u => `
-    <div class="card" data-user="${esc(u.username)}">
-      <span class="score ${scoreClass(u.score)}">${u.score}</span>
-      <div class="who">${esc(u.username)}${u.nickname && u.nickname !== u.username ? `<span class="nick">${esc(u.nickname)}</span>` : ''}
-        ${u.flags.map(f => `<span class="flag ${flagClass(f)}">${esc(f)}</span>`).join('')}</div>
-      <div class="reasons">${u.reasons.map(r => `<span class="reason ${reasonClass(r)}">${esc(r)}</span>`).join('')}</div>
-    </div>`).join('') || '<p class="note">Nobody scored above 0.</p>';
+  const all = (state.snap?.users ?? []).filter(u => (u.score > 0 || u.pinned) && (!q || u.username.toLowerCase().includes(q) || (u.nickname ?? '').toLowerCase().includes(q)));
+  const visible = all.filter(u => state.showDismissed || u.dismissedAt == null);
+  const active = SUSPECT_TAGS.filter(t => state.suspectFilters.has(t.key));
+  const list = (active.length ? visible.filter(u => active.some(t => t.test(u))) : visible)
+    .sort((a, b) => (b.pinned - a.pinned) || ((a.dismissedAt != null) - (b.dismissedAt != null)) || (b.score - a.score));
+  return { all, visible, list, dismissed: all.filter(u => u.dismissedAt != null).length };
 }
+
+function renderSuspects() {
+  const { visible, list, dismissed } = suspectRows();
+  $('#suspect-filters').innerHTML = SUSPECT_TAGS.map(t => { const n = visible.filter(t.test).length; return n || state.suspectFilters.has(t.key)
+    ? `<button class="chip ${state.suspectFilters.has(t.key) ? 'on' : ''}" data-filter="${t.key}">${t.label}<span class="n">${n}</span></button>` : ''; }).join('')
+    + (state.suspectFilters.size ? '<button class="chip" data-filter="">clear filters</button>' : '');
+  $('#dismissed-count').textContent = dismissed ? `(${dismissed})` : '';
+  $('#btn-clear-suspects').disabled = !list.some(u => !u.pinned && u.dismissedAt == null);
+  $('#suspects-list').innerHTML = list.slice(0, 300).map(u => `
+    <div class="card ${u.pinned ? 'pinned' : ''} ${u.dismissedAt != null ? 'dismissed' : ''}" data-user="${esc(u.username)}">
+      <span class="score ${scoreClass(u.score)}">${u.score}</span>
+      <div class="who">${u.pinned ? '📌 ' : ''}${esc(u.username)}${u.nickname && u.nickname !== u.username ? `<span class="nick">${esc(u.nickname)}</span>` : ''}
+        ${u.flags.map(f => `<span class="flag ${flagClass(f)}">${esc(f)}</span>`).join('')}${u.dismissedAt != null ? `<span class="flag">dismissed ${fmtTime(u.dismissedAt)}</span>` : ''}</div>
+      <div class="card-actions">
+        <button class="pin ${u.pinned ? 'on' : ''}" data-action="pin" title="${u.pinned ? 'Unpin: this account can be cleared again' : 'Pin: keep this account on the list when clearing'}">${u.pinned ? 'Pinned' : 'Pin'}</button>
+        ${u.dismissedAt != null ? '<button data-action="restore" title="Put this account back on the list">Restore</button>' : `<button data-action="dismiss" title="Hide this account until it joins again" ${u.pinned ? 'disabled' : ''}>Dismiss</button>`}
+      </div>
+      <div class="reasons">${u.reasons.map(r => `<span class="reason ${reasonClass(r)}">${esc(r)}</span>`).join('') || '<span class="reason">nothing suspicious</span>'}</div>
+    </div>`).join('') || `<p class="note">${visible.length ? 'Nothing matches the selected tags.' : dismissed ? 'Everything is dismissed. Tick "show dismissed" to see them.' : 'Nobody scored above 0.'}</p>`;
+}
+
+$('#suspect-filters').addEventListener('click', e => {
+  const b = e.target.closest('button[data-filter]'); if (!b) return;
+  const k = b.dataset.filter;
+  if (!k) state.suspectFilters.clear(); else if (state.suspectFilters.has(k)) state.suspectFilters.delete(k); else state.suspectFilters.add(k);
+  renderSuspects();
+});
+$('#show-dismissed').addEventListener('change', e => { state.showDismissed = e.target.checked; renderSuspects(); });
+$('#btn-clear-suspects').addEventListener('click', async () => {
+  const { list } = suspectRows();
+  const names = list.filter(u => !u.pinned && u.dismissedAt == null).map(u => u.username);
+  if (!names.length) return;
+  const pinnedCount = list.filter(u => u.pinned).length;
+  if (!confirm(`Dismiss ${names.length} account${names.length === 1 ? '' : 's'} from the list?${pinnedCount ? ` ${pinnedCount} pinned account${pinnedCount === 1 ? '' : 's'} will stay.` : ''} They come back if they join again.`)) return;
+  await api.dismiss(state.current, names);
+  await refreshSnapshot();
+});
+$('#suspects-list').addEventListener('click', async e => {
+  const b = e.target.closest('button[data-action]'); if (!b) return;
+  e.stopPropagation();
+  const user = b.closest('[data-user]').dataset.user;
+  if (b.dataset.action === 'pin') { const on = b.classList.contains('on'); await api.editList(state.current, 'pinned', on ? 'remove' : 'add', [user]); await loadConfig(); }
+  else if (b.dataset.action === 'dismiss') await api.dismiss(state.current, [user]);
+  else if (b.dataset.action === 'restore') await api.undismiss(state.current, [user]);
+  await refreshSnapshot();
+}, true);
 
 // ---------- chat & log ----------
 const nearBottom = el => el.scrollHeight - el.scrollTop - el.clientHeight < 40;
@@ -189,11 +248,12 @@ async function renderDetail() {
   const yn = v => v == null ? '–' : v ? 'yes' : 'no';
   const kv = pairs => `<dl class="kv">${pairs.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v}</dd>`).join('')}</dl>`;
   const watched = roomLists(state.current).watch.includes(d.username);
+  const pinned = roomLists(state.current).pinned?.includes(d.username);
   const score = t ? `<div class="scorebox"><span class="score ${scoreClass(t.score)}">${t.score}</span><div class="reasons">${t.reasons.length ? t.reasons.map(r => `<span class="reason ${reasonClass(r)}">${esc(r)}</span>`).join('') : '<span class="none">nothing suspicious</span>'}</div></div>`
     : '<p class="note">Not seen today, so no score. Showing history only.</p>';
   const parts = [
     score,
-    `<div class="actions"><button class="btn" id="d-watch">${watched ? 'Unwatch' : 'Watch'}</button><button class="btn" id="d-open">Open on TikTok</button></div>`,
+    `<div class="actions"><button class="btn" id="d-watch">${watched ? 'Unwatch' : 'Watch'}</button><button class="btn" id="d-pin">${pinned ? 'Unpin' : 'Pin'}</button><button class="btn" id="d-open">Open on TikTok</button></div>`,
     '<h4>Profile (as reported by TikTok)</h4>',
     kv([
       ['followers', num(p.followers)], ['following', num(p.following)],
@@ -219,6 +279,7 @@ async function renderDetail() {
   if (d.chat.length) parts.push(`<h4>Recent chat (${d.chat.length})</h4>`, `<div class="chatlog">${d.chat.map(c => `<div class="line"><span class="t">${fmtTime(c.t)}</span><span class="m">${esc(c.text)}</span></div>`).join('')}</div>`);
   $('#detail-body').innerHTML = parts.join('');
   $('#d-watch').onclick = async () => { await api.editList(state.current, 'watch', watched ? 'remove' : 'add', [d.username]); await loadConfig(); renderDetail(); };
+  $('#d-pin').onclick = async () => { await api.editList(state.current, 'pinned', pinned ? 'remove' : 'add', [d.username]); await loadConfig(); renderDetail(); scheduleRefresh(); };
   $('#d-open').onclick = () => api.openExternal(`https://www.tiktok.com/@${encodeURIComponent(d.username)}`);
 }
 
@@ -280,7 +341,7 @@ api.onEvent(ev => {
       if (!state.current && state.rooms.length) selectRoom(state.rooms[0].room);
       break;
     case 'users': if (ev.room === state.current) scheduleRefresh(); break;
-    case 'lists': state.config = { ...state.config, lists: { ...(state.config?.lists ?? {}), [ev.room]: { watch: ev.watch, blacklist: ev.blacklist } } }; renderLists(); scheduleRefresh(); break;
+    case 'lists': state.config = { ...state.config, lists: { ...(state.config?.lists ?? {}), [ev.room]: { watch: ev.watch, blacklist: ev.blacklist, pinned: ev.pinned ?? [] } } }; renderLists(); scheduleRefresh(); break;
     case 'saved': if (ev.room === state.current) toast(`@${ev.room} saved`, `${ev.count} users written to today's snapshot and the room history`, 'ok', 4000); break;
   }
 });
@@ -316,7 +377,8 @@ const HELP = {
 </ul>
 <p>Add someone by typing their username below, or with the <b>Watch</b> button in a viewer's detail drawer.</p>
 <div class="example"><b>Typical flow.</b> The blacklist or the Suspects tab surfaces an account that looks like a burner. Put it on the watch list, and from then on every move it makes in this room is announced.</div>
-<p>Cross-room alerts do not need the watch list: anyone who overlaps with a blacklisted streamer is flagged, watched or not.</p>`,
+<p>Cross-room alerts do not need the watch list: anyone who overlaps with a blacklisted streamer is flagged, watched or not.</p>
+<p><b>Pinning</b> (Suspects tab) is different again: a pinned account simply stays on the Suspects list when you clear it, and always shows there even with a score of 0. Pin what you want to keep looking at; watch what you want to be told about.</p>`,
   },
 };
 function openHelp(key) {
@@ -348,7 +410,7 @@ document.addEventListener('click', async e => {
   const x = e.target.closest('button.x[data-list]');
   if (x) { await api.editList(state.current, x.dataset.list, 'remove', [x.dataset.name]); await loadConfig(); scheduleRefresh(); return; }
   const row = e.target.closest('[data-user]');
-  if (row && !e.target.closest('.side-list')) openDetail(row.dataset.user);
+  if (row && !e.target.closest('.side-list') && !e.target.closest('button[data-action]')) openDetail(row.dataset.user);
 });
 $('#users-table thead').addEventListener('click', e => {
   const th = e.target.closest('th[data-key]'); if (!th) return;

@@ -67,6 +67,13 @@
       </div>
       <div id="tab-suspects" class="tab" hidden>
         <p class="note">Points are added for each burner-like signal. The score ranks who deserves a look; it proves nothing on its own. In busy rooms most one-time visitors earn a few points just for being new and quiet, so weigh the profile and blacklist reasons more.</p>
+        <div id="suspect-tools" class="toolbar">
+          <div id="suspect-filters" class="chipbar" title="Show only accounts with any of the selected tags"></div>
+          <div class="toolbar-right">
+            <label class="check"><input type="checkbox" id="show-dismissed"> show dismissed <span id="dismissed-count" class="count"></span></label>
+            <button id="btn-clear-suspects" class="btn" title="Dismiss every account shown here except pinned ones. They come back if they join the room again.">Clear list</button>
+          </div>
+        </div>
         <div id="suspects-list" class="cards"></div>
       </div>
       <div id="tab-chat" class="tab" hidden><div id="chat-list" class="stream"></div></div>
@@ -102,6 +109,8 @@
       <label>Euler Stream API key (optional) <input name="signApiKey" type="password" autocomplete="off"></label>
       <label class="check"><input name="reconnectWhenLive" type="checkbox"> wait for offline streamers to go live</label>
       <label class="check"><input name="resume" type="checkbox"> resume today's snapshot on start</label>
+      <label class="check"><input name="chatToFile" type="checkbox"> write chat to a text file (one per room and day, in the data folder)</label>
+      <label class="check"><input name="eventsToFile" type="checkbox"> write the event log to a text file (joins, leaves, gifts, flags)</label>
       <p class="note" id="settings-path"></p>
       <div class="dialog-actions">
         <button type="button" class="btn" id="settings-cancel">Cancel</button>

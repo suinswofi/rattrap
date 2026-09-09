@@ -15,7 +15,7 @@
 // TikTok's own timestamps, so people who arrived shortly before Bouncer connected are picked up.
 
 import { EventEmitter } from 'node:events';
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, appendFileSync, mkdirSync, existsSync } from 'node:fs';
 import { join as pathJoin, dirname, isAbsolute } from 'node:path';
 import { TikTokLiveConnection, WebcastEvent, ControlEvent, UserOfflineError, SignatureRateLimitError } from 'tiktok-live-connector';
 import { ViewerTracker } from './tracker.js';
@@ -26,7 +26,7 @@ export const DEFAULTS = {
   username: 'the_great_sir_stromburg',
   rooms: [],                 // rooms the GUI opens on start (falls back to `username`)
   idleTimeoutMinutes: 15,
-  lists: {},                 // per room: { "<room>": { watch: [...], blacklist: [...] } }
+  lists: {},                 // per room: { "<room>": { watch: [...], blacklist: [...], pinned: [...] } }
   burnerAlertScore: 6,
   signApiKey: '',
   dataDir: 'data',
@@ -37,6 +37,8 @@ export const DEFAULTS = {
   chatHistory: 50,
   logEvents: true,
   logChat: false,
+  chatToFile: false,         // append every chat message to data/chat-<room>-<date>.txt
+  eventsToFile: false,       // append the event log (joins, leaves, gifts, flags…) to data/log-<room>-<date>.txt
 };
 
 export const normalizeUsername = s => String(s ?? '').trim().replace(/^@/, '').replace(/^https?:\/\/(www\.)?tiktok\.com\/@?/, '').replace(/\/.*$/, '').toLowerCase();
@@ -59,7 +61,7 @@ export function normalizeConfig(cfg, baseDir) {
   const lists = {};
   for (const [room, l] of Object.entries(cfg.lists ?? {})) {
     const r = normalizeUsername(room); if (!r) continue;
-    lists[r] = { watch: nameSet(l?.watch), blacklist: nameSet(l?.blacklist) };
+    lists[r] = { watch: nameSet(l?.watch), blacklist: nameSet(l?.blacklist), pinned: nameSet(l?.pinned) };
   }
   cfg.lists = lists;
   cfg.idleTimeoutMinutes = Number(cfg.idleTimeoutMinutes);
@@ -77,17 +79,20 @@ export function normalizeConfig(cfg, baseDir) {
 /** The watch/blacklist for one room, created (from the legacy global lists) on first use. */
 export function roomLists(cfg, room) {
   const r = normalizeUsername(room);
-  if (!cfg.lists[r]) cfg.lists[r] = { watch: new Set(cfg.legacyLists?.watch ?? []), blacklist: new Set(cfg.legacyLists?.blacklist ?? []) };
+  if (!cfg.lists[r]) cfg.lists[r] = { watch: new Set(cfg.legacyLists?.watch ?? []), blacklist: new Set(cfg.legacyLists?.blacklist ?? []), pinned: new Set() };
+  if (!cfg.lists[r].pinned) cfg.lists[r].pinned = new Set();
   return cfg.lists[r];
 }
 
 /** Plain-JSON view of a config (Sets become arrays) for saving or sending to a renderer. */
 export function configToJSON(cfg) {
   const { legacyLists, ...rest } = cfg;
-  return { ...rest, lists: Object.fromEntries(Object.entries(cfg.lists).map(([r, l]) => [r, { watch: [...l.watch], blacklist: [...l.blacklist] }])) };
+  return { ...rest, lists: Object.fromEntries(Object.entries(cfg.lists).map(([r, l]) => [r, { watch: [...l.watch], blacklist: [...l.blacklist], pinned: [...(l.pinned ?? [])] }])) };
 }
 
-const dateOf = ts => { const d = new Date(ts); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+const pad2 = n => String(n).padStart(2, '0');
+const dateOf = ts => { const d = new Date(ts); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; };
+const stamp = ts => { const d = new Date(ts); return `${dateOf(ts)} ${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`; };
 
 export class Monitor extends EventEmitter {
   /**
@@ -129,6 +134,8 @@ export class Monitor extends EventEmitter {
 
   // ---------- lifecycle ----------
   get snapshotFile() { return pathJoin(this.cfg.dataDir, `viewers-${this.username}-${this.sessionDate ?? dateOf(Date.now())}.json`); }
+  get chatFile() { return pathJoin(this.cfg.dataDir, `chat-${this.username}-${this.sessionDate ?? dateOf(Date.now())}.txt`); }
+  get eventsFile() { return pathJoin(this.cfg.dataDir, `log-${this.username}-${this.sessionDate ?? dateOf(Date.now())}.txt`); }
 
   start() {
     if (this.state !== 'stopped') return this;
@@ -328,8 +335,26 @@ export class Monitor extends EventEmitter {
     entry.alert = !!(entry.watched || kind === 'flag' || kind === 'error');
     this.logLines.push(entry);
     if (this.logLines.length > this.logLimit) this.logLines.splice(0, this.logLines.length - this.logLimit);
+    this._toFile(entry);
     this.emit('log', entry);
     return entry;
+  }
+
+  /** Append the entry to the chat or event log file when that option is on. Failures are reported once. */
+  _toFile(entry) {
+    const chat = entry.kind === 'chat';
+    if (!(chat ? this.cfg.chatToFile : this.cfg.eventsToFile)) return;
+    const file = chat ? this.chatFile : this.eventsFile;
+    const who = entry.user ? `${entry.user}${entry.nickname && entry.nickname !== entry.user ? ` (${entry.nickname})` : ''}` : '';
+    const line = chat
+      ? `${stamp(entry.t)}  ${who}: ${entry.text}`
+      : `${stamp(entry.t)}  ${entry.kind.padEnd(7)}  ${who}${who ? '  ' : ''}${entry.text}`;
+    try {
+      if (!this._fileDirReady) { mkdirSync(dirname(file), { recursive: true }); this._fileDirReady = true; }
+      appendFileSync(file, line + '\n');
+    } catch (e) {
+      if (!this._fileError) { this._fileError = true; this.emit('log', { t: Date.now(), kind: 'error', text: `could not write ${file}: ${e.message}`, room: this.username, alert: true }); }
+    }
   }
 
   _maybeFlag(u) {
@@ -344,6 +369,25 @@ export class Monitor extends EventEmitter {
 
   // ---------- queries ----------
   watched(username) { return this.lists.watch.has(username.toLowerCase()); }
+  pinned(username) { return this.lists.pinned.has(username.toLowerCase()); }
+
+  /** Hide accounts from the suspects list (until they join again). Pinned accounts are never dismissed. */
+  dismiss(usernames, now = Date.now()) {
+    let n = 0;
+    for (const name of usernames) {
+      const u = this.tracker.get(name);
+      if (!u || this.pinned(u.username) || u.dismissedAt !== null) continue;
+      u.dismissedAt = now; n++;
+    }
+    if (n) this._changed();
+    return n;
+  }
+  undismiss(usernames) {
+    let n = 0;
+    for (const name of usernames) { const u = this.tracker.get(name); if (u?.dismissedAt !== null && u) { u.dismissedAt = null; n++; } }
+    if (n) this._changed();
+    return n;
+  }
   presentNow(username) { return !!this.tracker.users.get(username)?.present; }
 
   /** Other monitored rooms (excluding this one), optionally only blacklisted ones. */
@@ -395,6 +439,7 @@ export class Monitor extends EventEmitter {
       isFollower: u.isFollower, isAdmin: u.isAdmin, followed: u.followed,
       score: a.score, reasons: a.reasons, blacklisted: a.blacklisted, flags,
       aliases: h?.aliases ?? [], watched: this.watched(u.username),
+      pinned: this.pinned(u.username), dismissedAt: u.dismissedAt,
     };
   }
 
@@ -443,7 +488,11 @@ export class Monitor extends EventEmitter {
     return rooms.sort((a, b) => (b.presentNow - a.presentNow) || (b.blacklisted - a.blacklisted));
   }
 
-  suspects(n = 20) { return this.rows().filter(r => r.score > 0).sort((a, b) => b.score - a.score).slice(0, n); }
+  /** Pinned accounts and everyone with a score, minus dismissed ones; pinned first, then by score. */
+  suspects(n = 20, includeDismissed = false) {
+    return this.rows().filter(r => (r.score > 0 || r.pinned) && (includeDismissed || r.dismissedAt === null))
+      .sort((a, b) => (b.pinned - a.pinned) || (b.score - a.score)).slice(0, n);
+  }
   present() { return this.rows().filter(r => r.present); }
   find(q) { return this.tracker.find(q).map(u => this.row(u)); }
   top(field = 'chats', n = 20) { return this.tracker.top(field, n).map(u => this.row(u)); }

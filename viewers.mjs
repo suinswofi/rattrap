@@ -14,6 +14,8 @@
 //   --no-resume            do not load today's saved snapshot on start
 //   --quiet                start with the live event log off
 //   --chat                 also print every chat message in the event log
+//   --chat-file            append every chat message to data/chat-<room>-<date>.txt
+//   --log-file             append the event log to data/log-<room>-<date>.txt
 //
 // Accuracy notes:
 //  - TikTok sends no "user left" event. A leave is inferred when the user re-joins (they must have
@@ -60,6 +62,8 @@ if (args.data) cfg.dataDir = args.data;
 if (args['no-resume']) cfg.resume = false;
 if (args.quiet) cfg.logEvents = false;
 if (args.chat) cfg.logChat = true;
+if (args['chat-file']) cfg.chatToFile = true;
+if (args['log-file']) cfg.eventsToFile = true;
 cfg.signApiKey = args.key || process.env.EULER_API_KEY || process.env.SIGN_API_KEY || cfg.signApiKey || '';
 try { normalizeConfig(cfg, HERE); } catch (e) { console.error(e.message); process.exit(1); }
 if (!cfg.username) { console.error('no username given (argument, config.json or TIKTOK_USER)'); process.exit(1); }
@@ -140,6 +144,8 @@ const commands = {
   show <user>         full record for one user, including history and their recent chat
   score <user>        why a user has the score they have
   suspects [n]        users seen today ranked by burner score, with reasons (default 20)
+  pin <user…> / unpin <user…>   keep accounts on the suspects list when clearing
+  dismiss <user…>|all           hide accounts from the suspects list until they join again
   rooms [user]        other rooms with history files; with a user: where else they were seen
   blacklist [add|rm <user…>]   show or edit the blacklisted streamers (flags their followers/viewers)
   chat [n]            last n chat messages in the room (default 20)
@@ -187,6 +193,12 @@ const commands = {
     console.log('');
     for (const u of rows) console.log(`${String(u.score).padStart(3)}  ${u.username}: ${u.reasons.join('; ')}`);
   },
+  pin(a) { for (const w of a.split(/[\s,]+/).map(normalizeUsername).filter(Boolean)) lists.pinned.add(w); console.log(`pinned: ${[...lists.pinned].join(', ') || '-'}`); },
+  unpin(a) { for (const w of a.split(/[\s,]+/).map(normalizeUsername).filter(Boolean)) lists.pinned.delete(w); commands.pin(''); },
+  dismiss(a) {
+    const names = a.trim() === 'all' ? monitor.suspects(Infinity).filter(u => !u.pinned).map(u => u.username) : a.split(/[\s,]+/).filter(Boolean);
+    console.log(`dismissed ${monitor.dismiss(names)} account(s)`);
+  },
   rooms(id) {
     const idx = monitor.refreshRoomIndex();
     if (!id) {
@@ -231,7 +243,8 @@ title: ${s.title ?? '-'}
 viewers now: ${s.viewers ?? '?'}   total viewers (tiktok): ${s.totalViewers ?? '?'}   likes: ${s.likes ?? '?'}
 tracked: ${s.counts.seen} users seen, ${s.counts.present} believed present, ${s.counts.chatted} chatted, ${s.counts.gifted} gifted, ${s.counts.flagged} flagged
 history: ${s.counts.known} users ever seen here   other rooms: ${s.otherRooms.length}   blacklist: ${[...lists.blacklist].join(', ') || '-'}   alert at score: ${cfg.burnerAlertScore}
-idle timeout: ${cfg.idleTimeoutMinutes}m   autosave: ${cfg.autosaveMinutes ? `every ${cfg.autosaveMinutes}m` : 'off'}   watch: ${[...lists.watch].join(', ') || '-'}`);
+idle timeout: ${cfg.idleTimeoutMinutes}m   autosave: ${cfg.autosaveMinutes ? `every ${cfg.autosaveMinutes}m` : 'off'}   watch: ${[...lists.watch].join(', ') || '-'}
+files: chat ${cfg.chatToFile ? monitor.chatFile : 'off'}   events ${cfg.eventsToFile ? monitor.eventsFile : 'off'}`);
   },
   log(v) { logEvents = v !== 'off'; console.log(`event log ${logEvents ? 'on' : 'off'}`); },
   logchat(v) { logChat = v !== 'off'; console.log(`chat log ${logChat ? 'on' : 'off'}`); },

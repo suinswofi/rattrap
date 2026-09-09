@@ -77,7 +77,7 @@ const getMonitor = name => {
 // ---------- IPC ----------
 ipcMain.handle('config:get', () => ({ ...configToJSON(cfg), configFile: CONFIG_FILE }));
 ipcMain.handle('config:set', (_e, patch) => {
-  const allowed = ['idleTimeoutMinutes', 'burnerAlertScore', 'autosaveMinutes', 'signApiKey', 'reconnectWhenLive', 'livePollSeconds', 'chatHistory', 'resume', 'logChat', 'logEvents'];
+  const allowed = ['idleTimeoutMinutes', 'burnerAlertScore', 'autosaveMinutes', 'signApiKey', 'reconnectWhenLive', 'livePollSeconds', 'chatHistory', 'resume', 'logChat', 'logEvents', 'chatToFile', 'eventsToFile'];
   const next = { ...cfg };
   for (const k of allowed) if (patch && patch[k] !== undefined) next[k] = patch[k];
   normalizeConfig(next, null); // throws on bad values; dataDir already absolute
@@ -96,13 +96,15 @@ ipcMain.handle('room:log', (_e, name) => getMonitor(name).logLines);
 ipcMain.handle('room:chat', (_e, name) => getMonitor(name).recentChat);
 ipcMain.handle('room:flags', (_e, name) => [...getMonitor(name).flagged.values()]);
 ipcMain.handle('room:save', (_e, name) => getMonitor(name).save());
+ipcMain.handle('room:dismiss', (_e, name, users) => getMonitor(name).dismiss(Array.isArray(users) ? users : [users]));
+ipcMain.handle('room:undismiss', (_e, name, users) => getMonitor(name).undismiss(Array.isArray(users) ? users : [users]));
 ipcMain.handle('list:edit', (_e, room, list, op, names) => {
-  if (!['watch', 'blacklist'].includes(list)) throw new Error('unknown list');
+  if (!['watch', 'blacklist', 'pinned'].includes(list)) throw new Error('unknown list');
   const lists = roomLists(cfg, room);
   const set = lists[list];
   for (const n of nameSet(Array.isArray(names) ? names : String(names).split(/[\s,]+/))) op === 'remove' ? set.delete(n) : set.add(n);
   saveConfig();
-  send({ type: 'lists', room: normalizeUsername(room), watch: [...lists.watch], blacklist: [...lists.blacklist] });
+  send({ type: 'lists', room: normalizeUsername(room), watch: [...lists.watch], blacklist: [...lists.blacklist], pinned: [...lists.pinned] });
   return [...set];
 });
 ipcMain.handle('open:data', () => shell.openPath(cfg.dataDir));
