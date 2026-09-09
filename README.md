@@ -94,9 +94,29 @@ fresh account looks the same as a burner until they do something. In busy rooms 
 join and like events, so many honest viewers appear once and never again, which alone earns a
 couple of points. Rely on the profile-based reasons and the blacklist, not on the lurker signals.
 
+## Building installers
+
+```sh
+npm run dist:linux     # dist/Bouncer-<version>-linux-x86_64.AppImage
+npm run dist:win       # dist/Bouncer-<version>-setup.exe (installer) and Bouncer-<version>-portable.exe
+npm run dist           # both
+```
+
+Windows packages build on Linux too as long as `wine` is installed. The GitHub Actions workflow
+in `.github/workflows/build.yml` builds both on every push to `main` and attaches them as
+artifacts; pushing a tag such as `v1.0.1` also publishes them to a GitHub release.
+
+The packages are not code-signed, so Windows SmartScreen will warn on first run
+("More info" → "Run anyway"). The AppImage needs to be marked executable (`chmod +x`).
+
+A packaged Bouncer keeps `config.json` and the `data/` folder in the per-user app data
+directory (`~/.config/bouncer` on Linux, `%APPDATA%\bouncer` on Windows); the Data folder button
+opens it. Running from the repo uses the files next to the code.
+
 ## Configuration
 
-`config.json` next to the app (all keys optional). The GUI edits it for you; the terminal client
+`config.json` next to the app when running from the repo, or in the app data folder when
+packaged (all keys optional; copy `config.example.json` to start). The GUI edits it for you; the terminal client
 takes the flags shown in brackets.
 
 | key                  | default                    | meaning |
