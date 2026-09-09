@@ -36,7 +36,9 @@ npm test
 
 If a streamer is offline the monitor waits and connects when they go live. It reconnects after
 drops, marks everyone as gone when the stream ends, autosaves, and resumes today's snapshot on
-restart.
+restart. On connect it also replays TikTok's backlog of recent events, stamped with TikTok's own
+timestamps, so people who arrived shortly before Bouncer connected are picked up with their real
+arrival time (their log lines say "before Bouncer connected").
 
 ## What is remembered
 
@@ -174,7 +176,9 @@ save [file] / reconnect / quit
 TikTok sends no "user left" event. A leave is inferred either when a user re-joins
 (they must have left in between) or after the idle timeout with no chat/like/gift/share.
 The recorded leave time is the last moment they were seen, so it is never later than reality.
-In busy rooms TikTok samples join and like events, so not every viewer will appear.
+In busy rooms TikTok samples join and like events, so not every viewer will appear until they
+chat, gift, follow or share, which are always delivered. Nothing on the client side can change
+that: no client sees more joins than TikTok chooses to send.
 
 Follower counts and the other profile fields are whatever TikTok attaches to the viewer's own
 events; a dash means it was never delivered. Account creation dates and bios exist in TikTok's

@@ -8,8 +8,12 @@ import { WebcastEvent, ControlEvent } from 'tiktok-live-connector';
 import { Monitor, DEFAULTS, normalizeConfig, configToJSON, roomLists, who } from './monitor.js';
 
 class FakeConnection extends EventEmitter {
-  constructor() { super(); this.connected = false; }
-  async connect() { this.connected = true; return { roomId: 'r1', roomInfo: { data: { title: 'test stream', user_count: 42 } } }; }
+  constructor(backlog = []) { super(); this.connected = false; this.backlog = backlog; }
+  async connect() {
+    for (const [ev, d] of this.backlog) this.emit(ev, d); // the real library replays the initial batch here
+    this.connected = true;
+    return { roomId: 'r1', roomInfo: { data: { title: 'test stream', user_count: 42 } } };
+  }
   disconnect() { this.connected = false; }
   async waitUntilLive() { return true; }
 }
@@ -197,5 +201,35 @@ test('a viewer in two monitored rooms at once is flagged both ways', async () =>
     // 3. the blacklisted room itself does not flag host's viewers (its own blacklist is empty)
     assert.equal(bad.flagged.size, 0);
     host.stop(); bad.stop();
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('the pre-connection backlog is replayed with TikTok timestamps', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'bouncer-'));
+  try {
+    const now = Date.now();
+    const early = { ...user('early_bird', { nickname: 'Early' }), common: { createTime: String(now - 5 * 60_000) } };
+    const chat = { ...user('early_bird', { nickname: 'Early' }), comment: 'hello', common: { createTime: String(now - 4 * 60_000) } };
+    const bogus = { ...user('bogus_time', { nickname: 'Bogus' }), common: { createTime: '12345' } }; // far in the past: ignored
+    const conn = new FakeConnection([[WebcastEvent.MEMBER, early], [WebcastEvent.CHAT, chat], [WebcastEvent.MEMBER, bogus]]);
+    const m = new Monitor('host', cfgFor(dir), { createConnection: () => conn });
+    m.start(); await tick();
+    assert.equal(m.backlog, false);
+    const u = m.tracker.get('early_bird');
+    assert.equal(u.present, true);
+    assert.ok(Math.abs(u.firstSeen - (now - 5 * 60_000)) < 1000, 'arrival time comes from TikTok');
+    assert.ok(Math.abs(u.lastSeen - (now - 4 * 60_000)) < 1000);
+    assert.equal(u.chats, 1);
+    const joinLine = m.logLines.find(l => l.kind === 'join' && l.user === 'early_bird');
+    assert.ok(joinLine.backlog);
+    assert.ok(joinLine.text.includes('before Bouncer connected'));
+    assert.ok(Math.abs(joinLine.t - (now - 5 * 60_000)) < 1000);
+    assert.ok(Math.abs(m.tracker.get('bogus_time').firstSeen - now) < 1000, 'absurd timestamps fall back to now');
+    // a live event after connect is not marked as backlog
+    conn.emit(WebcastEvent.MEMBER, user('live_one', { nickname: 'Live' }));
+    const live = m.logLines.find(l => l.kind === 'join' && l.user === 'live_one');
+    assert.equal(live.backlog, false);
+    assert.ok(!live.text.includes('before'));
+    m.stop();
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });

@@ -169,6 +169,7 @@ td .flag { display: inline-block; font-size: 10px; font-weight: 700; padding: 1p
 .line.error .m { color: #ff8280; }
 .line.system .m, .line.status .m { color: var(--dim); font-style: italic; }
 .line.watched { background: var(--purple-dim); }
+.line.backlog .t { opacity: .6; }
 
 .empty { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; gap: 12px; color: var(--muted); }
 .empty-mark { width: 48px; height: 48px; font-size: 26px; border-radius: 10px; }

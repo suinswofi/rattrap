@@ -11,6 +11,8 @@
 // TikTok sends no "user left" event. A leave is inferred when the user re-joins (they must have
 // left in between) or after the idle timeout with no activity. Leave time = last time seen.
 // In busy rooms TikTok samples join/like events, so not every viewer will appear.
+// On connect TikTok hands over a backlog of recent events; those are processed too, stamped with
+// TikTok's own timestamps, so people who arrived shortly before Bouncer connected are picked up.
 
 import { EventEmitter } from 'node:events';
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
@@ -118,6 +120,7 @@ export class Monitor extends EventEmitter {
     this.startedAt = null;
     this.sessionDate = null;
     this.conn = null;
+    this.backlog = false; // true while the initial (pre-connection) batch is being replayed
     this.quitting = false;
     this.reconnectTimer = null;
     this.reconnectDelay = 10_000;
@@ -139,7 +142,7 @@ export class Monitor extends EventEmitter {
       try { const n = this.tracker.load(JSON.parse(readFileSync(this.snapshotFile, 'utf8'))); this._log('system', `resumed ${n} user records from today's snapshot`); }
       catch (e) { this._log('error', `could not load ${this.snapshotFile}: ${e.message}`); }
     }
-    this.conn = this.createConnection(this.username, { ...(this.cfg.signApiKey ? { signApiKey: this.cfg.signApiKey } : {}), processInitialData: false });
+    this.conn = this.createConnection(this.username, { ...(this.cfg.signApiKey ? { signApiKey: this.cfg.signApiKey } : {}), processInitialData: true });
     this._bind(this.conn);
     this.timers.push(setInterval(() => this._sweep(), 30_000));
     if (this.cfg.autosaveMinutes > 0) this.timers.push(setInterval(() => { try { this.save(); } catch (e) { this._log('error', `autosave failed: ${e.message}`); } }, this.cfg.autosaveMinutes * 60_000));
@@ -172,7 +175,9 @@ export class Monitor extends EventEmitter {
     clearTimeout(this.reconnectTimer); this.reconnectTimer = null;
     try {
       this._setState('connecting', 'connecting…');
-      const state = await this.conn.connect();
+      this.backlog = true; // the library replays the initial batch before connect() resolves
+      let state;
+      try { state = await this.conn.connect(); } finally { this.backlog = false; }
       this.reconnectDelay = 10_000;
       this.room.id = state?.roomId ?? null; this.room.live = true; this.room.connectedAt = Date.now();
       const info = state?.roomInfo?.data ?? state?.roomInfo ?? {};
@@ -212,63 +217,78 @@ export class Monitor extends EventEmitter {
   }
 
   // ---------- events from TikTok ----------
+  /** When the event happened: TikTok's own timestamp if it is sane, otherwise now. */
+  eventTime(d, now = Date.now()) {
+    const t = Number(d?.common?.createTime);
+    if (!Number.isFinite(t) || t <= 0) return now;
+    const ms = t < 1e12 ? t * 1000 : t; // seconds vs milliseconds
+    return ms > now - 6 * 60 * 60_000 && ms <= now + 60_000 ? ms : now;
+  }
+
   _bind(conn) {
     conn.on(WebcastEvent.MEMBER, d => {
       const w = who(d); if (!w) return;
+      const t = this.eventTime(d);
       const wasPresent = this.tracker.users.get(w.username)?.present;
-      const u = this.tracker.join(w.username, w.info);
+      const u = this.tracker.join(w.username, w.info, t);
       if (typeof d.memberCount === 'number' && d.memberCount > 0) this.room.viewers = d.memberCount;
-      this._log(wasPresent ? 'rejoin' : 'join', `${wasPresent ? 're-joined' : 'joined'}`, u);
+      const late = this.backlog ? ' (before Bouncer connected)' : '';
+      this._log(wasPresent ? 'rejoin' : 'join', `${wasPresent ? 're-joined' : 'joined'}${late}`, u, { t, backlog: this.backlog });
       this._maybeFlag(u);
       this._changed();
       this.emit('join', { room: this.username, user: u.username });
     });
     conn.on(WebcastEvent.CHAT, d => {
       const w = who(d); if (!w) return;
+      const t = this.eventTime(d);
       const text = d.content ?? d.comment ?? '';
-      const u = this.tracker.activity(w.username, w.info, 'chat', { text });
-      this.recentChat.push({ t: Date.now(), user: w.username, nickname: u.nickname, text });
+      const u = this.tracker.activity(w.username, w.info, 'chat', { text }, t);
+      this.recentChat.push({ t, user: w.username, nickname: u.nickname, text });
       if (this.recentChat.length > 500) this.recentChat.shift();
-      this._log('chat', text, u, { chat: true });
+      this._log('chat', text, u, { chat: true, t, backlog: this.backlog });
       this._maybeFlag(u);
       this._changed();
     });
     conn.on(WebcastEvent.LIKE, d => {
       const w = who(d); if (!w) return;
-      this.tracker.activity(w.username, w.info, 'like', { count: Number(d.count) || 1 });
+      this.tracker.activity(w.username, w.info, 'like', { count: Number(d.count) || 1 }, this.eventTime(d));
       if (d.total) this.room.likes = Number(d.total);
       this._changed();
     });
     conn.on(WebcastEvent.GIFT, d => {
       const w = who(d); if (!w) return;
+      const t = this.eventTime(d);
       // Streak gifts repeat with repeatEnd=0 until the final message (repeatEnd=1); count only the final one.
       const streak = d.gift?.type === 1 || d.gift?.combo === true;
-      if (streak && !d.repeatEnd) { this.tracker.activity(w.username, w.info); return; }
+      if (streak && !d.repeatEnd) { this.tracker.activity(w.username, w.info, null, {}, t); return; }
       const count = Number(d.repeatCount) || 1;
       const coins = (Number(d.gift?.diamondCount) || 0) * count;
-      const u = this.tracker.activity(w.username, w.info, 'gift', { count, coins });
-      this._log('gift', `${d.gift?.name ?? d.giftId} x${count}${coins ? ` (${coins} coins)` : ''}`, u);
+      const u = this.tracker.activity(w.username, w.info, 'gift', { count, coins }, t);
+      this._log('gift', `${d.gift?.name ?? d.giftId} x${count}${coins ? ` (${coins} coins)` : ''}`, u, { t, backlog: this.backlog });
       this._changed();
     });
     conn.on(WebcastEvent.FOLLOW, d => {
       const w = who(d); if (!w) return;
-      const u = this.tracker.activity(w.username, w.info, 'follow');
-      this._log('follow', 'followed', u);
+      const t = this.eventTime(d);
+      const u = this.tracker.activity(w.username, w.info, 'follow', {}, t);
+      this._log('follow', 'followed', u, { t, backlog: this.backlog });
       this._changed();
     });
     conn.on(WebcastEvent.SHARE, d => {
       const w = who(d); if (!w) return;
-      const u = this.tracker.activity(w.username, w.info, 'share');
-      this._log('share', 'shared the stream', u);
+      const t = this.eventTime(d);
+      const u = this.tracker.activity(w.username, w.info, 'share', {}, t);
+      this._log('share', 'shared the stream', u, { t, backlog: this.backlog });
       this._changed();
     });
     for (const ev of [WebcastEvent.EMOTE, WebcastEvent.SOCIAL, WebcastEvent.QUESTION_NEW, WebcastEvent.ENVELOPE]) {
-      conn.on(ev, d => { const w = who(d); if (w) this.tracker.activity(w.username, w.info); });
+      conn.on(ev, d => { const w = who(d); if (w) this.tracker.activity(w.username, w.info, null, {}, this.eventTime(d)); });
     }
     conn.on(WebcastEvent.ROOM_USER, d => {
       const total = Number(d.total); if (Number.isFinite(total) && total > 0) this.room.viewers = total;
       const tu = Number(d.totalUser); if (Number.isFinite(tu) && tu > 0) this.room.totalViewers = tu;
-      for (const r of d.ranks ?? []) { const w = who(r); if (w) this.tracker.activity(w.username, w.info); }
+      const t = this.eventTime(d);
+      for (const r of d.ranks ?? []) { const w = who(r); if (w) this.tracker.activity(w.username, w.info, null, {}, t); }
     });
     conn.on(WebcastEvent.STREAM_END, () => {
       this.room.live = false;

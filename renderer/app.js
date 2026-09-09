@@ -135,7 +135,7 @@ function renderSuspects() {
 
 // ---------- chat & log ----------
 const nearBottom = el => el.scrollHeight - el.scrollTop - el.clientHeight < 40;
-const lineHtml = e => `<div class="line ${esc(e.kind)} ${e.watched ? 'watched' : ''}"><span class="t">${fmtTime(e.t)}</span><span class="k">${esc(e.kind)}</span>${e.user ? `<span class="u" data-user="${esc(e.user)}">${esc(e.user)}</span>` : ''}<span class="m">${esc(e.text)}</span></div>`;
+const lineHtml = e => `<div class="line ${esc(e.kind)} ${e.watched ? 'watched' : ''} ${e.backlog ? 'backlog' : ''}"><span class="t">${fmtTime(e.t)}</span><span class="k">${esc(e.kind)}</span>${e.user ? `<span class="u" data-user="${esc(e.user)}">${esc(e.user)}</span>` : ''}<span class="m">${esc(e.text)}</span></div>`;
 const chatHtml = c => `<div class="line chat"><span class="t">${fmtTime(c.t)}</span><span class="u" data-user="${esc(c.user)}">${esc(c.nickname && c.nickname !== c.user ? `${c.nickname} (${c.user})` : c.user)}</span><span class="m">${esc(c.text)}</span></div>`;
 
 function renderLog() {
