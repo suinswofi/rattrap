@@ -22,13 +22,13 @@ npm test
 - **Rooms** (sidebar): every streamer being monitored, with a status dot (red = live, yellow =
   waiting for them to go live, purple = connecting) and present/seen counts. Add a room with the
   box below the list. Rooms added here are remembered in `config.json`.
-- **Blacklist** and **Watch list** (sidebar): edited in place, saved immediately.
+- **Blacklist** and **Watch list** (sidebar): one pair per room, edited in place, saved immediately.
 - **Users** tab: everyone seen today. Click a column to sort, type to search, tick "present only".
   Click a row for the detail drawer.
 - **Suspects** tab: today's users ranked by burner score with the reasons spelled out.
 - **Chat** and **Log** tabs: live chat and the join/leave/gift/flag event log.
-- **Detail drawer**: today's activity, TikTok-reported profile (followers, following, account
-  age, bio, verified, private), the room history (first seen ever, days seen, totals, previous
+- **Detail drawer**: today's activity, TikTok-reported profile (followers, following, verified,
+  private, gifter level), the room history (first seen ever, days seen, totals, previous
   usernames), other monitored rooms the account appeared in and whether it follows their host,
   and recent chat. Buttons to watch the account or open it on TikTok.
 - **Toasts** pop up for flagged joins, watched users, saves and errors.
@@ -52,15 +52,24 @@ Each room has its own history file, written only by that room's monitor, so seve
 open at once without conflicts. Days are stored separately and replaced on each save, so
 autosaves never double-count. A stream that runs past midnight still counts as one day.
 
-## Blacklisted streamers
+## Blacklisted streamers (cross-checking rooms)
 
-TikTok does not expose who follows whom, but every event a viewer generates in a room carries
-their follow status towards *that room's host*. So the way to learn whether someone follows
-@rival is to let Bouncer sit in @rival's room: add `rival` as a room **and** to the blacklist.
-While @rival is live, Bouncer records who was there and who follows them. In your own room,
-anyone recorded as following @rival is announced on join and tagged `BL:@rival`. Being seen in a
-blacklisted room without a confirmed follow counts too, with fewer points. Other rooms' histories
-are re-read whenever any room saves.
+Each room has its own blacklist of streamers to cross-check against. Add the rival as a room
+**and** to your room's blacklist. Then, for anyone in your room, Bouncer checks three things and
+flags them if any apply:
+
+- **In their room right now.** Both rooms are open in the app and the same account is present
+  in both. This fires an alert in your room whichever order it happens: when they join your room
+  while already in the rival's, and when they walk into the rival's room while sitting in yours.
+- **Follows them.** TikTok does not expose who follows whom, but every event a viewer generates
+  in a room carries their follow status towards *that room's host*. While the rival is live and
+  monitored, Bouncer records which viewers follow them. This works regardless of the viewer's
+  privacy settings.
+- **Seen there before.** Their account appears in the rival's room history from an earlier day.
+
+Blacklists are per room, so watching two streamers with different rivals keeps the alerts
+separate. Bouncer never scrapes anyone's following list; a follow is only learned from the
+rival's own room. Other rooms' histories are re-read whenever any room saves.
 
 ## Burner score
 
@@ -70,13 +79,12 @@ Weights live at the top of `burner.js`:
 | signal | points |
 |---|---|
 | follows a blacklisted streamer | 5 |
-| seen in a blacklisted streamer's room | 2 |
-| account created under 7 days ago / under 30 days | 4 / 2 |
+| in a blacklisted streamer's room right now | 4 |
+| seen in a blacklisted streamer's room before | 2 |
 | 0 followers / fewer than 10 followers | 2 / 1 |
 | 0 followers and 0 following | 1 |
 | auto-generated username (`user8237461920`) | 2 |
 | nickname never changed from the username | 1 |
-| empty bio (only when TikTok sent profile data) | 1 |
 | private account | 1 |
 | first day ever seen in this room | 1 |
 | joined but never chatted, liked, gifted or shared | 1 |
@@ -124,8 +132,7 @@ takes the flags shown in brackets.
 | `rooms`              | `[]`                       | rooms the app opens on start; falls back to `username` |
 | `username`           | `the_great_sir_stromburg`  | default room for the terminal client (first argument, or env `TIKTOK_USER`) |
 | `idleTimeoutMinutes` | `15`                       | inactivity after which a viewer is assumed gone (`--timeout`) |
-| `watch`              | `[]`                       | viewers whose joins/chats/gifts always alert (`--watch a,b`) |
-| `blacklist`          | `[]`                       | streamers whose followers and viewers are flagged (`--blacklist a,b`) |
+| `lists`              | `{}`                       | per room: `{ "<room>": { "watch": [...], "blacklist": [...] } }`. Terminal client: `--watch a,b`, `--blacklist a,b` for its room |
 | `burnerAlertScore`   | `6`                        | score at which a join is announced (`--alert n`) |
 | `signApiKey`         | `""`                       | optional Euler Stream API key for higher connect limits (`--key`, env `EULER_API_KEY`) |
 | `dataDir`            | `data`                     | snapshot and history directory (`--data`) |
@@ -169,6 +176,8 @@ TikTok sends no "user left" event. A leave is inferred either when a user re-joi
 The recorded leave time is the last moment they were seen, so it is never later than reality.
 In busy rooms TikTok samples join and like events, so not every viewer will appear.
 
-Follower counts, account age, bio and the other profile fields are whatever TikTok attaches
-to the viewer's own events; a dash means it was never delivered. Follow status towards another
+Follower counts and the other profile fields are whatever TikTok attaches to the viewer's own
+events; a dash means it was never delivered. Account creation dates and bios exist in TikTok's
+schema but are never filled in LIVE events (checked against real rooms), so Bouncer does not show
+or score them. Follow status towards another
 streamer is only known for rooms Bouncer has monitored.

@@ -4,6 +4,7 @@
 //   'status'  { room, state, message }        state: connecting | live | waiting | reconnecting | offline | stopped
 //   'log'     { t, kind, text, user?, watched, alert, chat? }   one line for the event log
 //   'flag'    { t, user, nickname, score, reasons, blacklisted }
+//   'join'    { room, user }                  someone entered (used to cross-check other rooms)
 //   'saved'   { file, count }
 //   'users'   nothing; throttled hint that the user table changed
 //
@@ -17,14 +18,13 @@ import { join as pathJoin, dirname, isAbsolute } from 'node:path';
 import { TikTokLiveConnection, WebcastEvent, ControlEvent, UserOfflineError, SignatureRateLimitError } from 'tiktok-live-connector';
 import { ViewerTracker } from './tracker.js';
 import { RoomHistory, historyFile, loadRoomIndex } from './history.js';
-import { scoreUser, accountAgeDays } from './burner.js';
+import { scoreUser } from './burner.js';
 
 export const DEFAULTS = {
   username: 'the_great_sir_stromburg',
   rooms: [],                 // rooms the GUI opens on start (falls back to `username`)
   idleTimeoutMinutes: 15,
-  watch: [],
-  blacklist: [],
+  lists: {},                 // per room: { "<room>": { watch: [...], blacklist: [...] } }
   burnerAlertScore: 6,
   signApiKey: '',
   dataDir: 'data',
@@ -51,8 +51,15 @@ export function readConfigFile(file) {
 export function normalizeConfig(cfg, baseDir) {
   cfg.username = normalizeUsername(cfg.username);
   cfg.rooms = [...nameSet(cfg.rooms)];
-  cfg.watch = nameSet(cfg.watch);
-  cfg.blacklist = nameSet(cfg.blacklist);
+  // Older configs had one global watch/blacklist; they become the starting lists of every room.
+  cfg.legacyLists = { watch: nameSet(cfg.watch), blacklist: nameSet(cfg.blacklist) };
+  delete cfg.watch; delete cfg.blacklist;
+  const lists = {};
+  for (const [room, l] of Object.entries(cfg.lists ?? {})) {
+    const r = normalizeUsername(room); if (!r) continue;
+    lists[r] = { watch: nameSet(l?.watch), blacklist: nameSet(l?.blacklist) };
+  }
+  cfg.lists = lists;
   cfg.idleTimeoutMinutes = Number(cfg.idleTimeoutMinutes);
   if (!Number.isFinite(cfg.idleTimeoutMinutes) || cfg.idleTimeoutMinutes <= 0) throw new Error('idleTimeoutMinutes must be a positive number');
   cfg.burnerAlertScore = Number(cfg.burnerAlertScore);
@@ -65,8 +72,18 @@ export function normalizeConfig(cfg, baseDir) {
   return cfg;
 }
 
+/** The watch/blacklist for one room, created (from the legacy global lists) on first use. */
+export function roomLists(cfg, room) {
+  const r = normalizeUsername(room);
+  if (!cfg.lists[r]) cfg.lists[r] = { watch: new Set(cfg.legacyLists?.watch ?? []), blacklist: new Set(cfg.legacyLists?.blacklist ?? []) };
+  return cfg.lists[r];
+}
+
 /** Plain-JSON view of a config (Sets become arrays) for saving or sending to a renderer. */
-export const configToJSON = cfg => ({ ...cfg, watch: [...cfg.watch], blacklist: [...cfg.blacklist] });
+export function configToJSON(cfg) {
+  const { legacyLists, ...rest } = cfg;
+  return { ...rest, lists: Object.fromEntries(Object.entries(cfg.lists).map(([r, l]) => [r, { watch: [...l.watch], blacklist: [...l.blacklist] }])) };
+}
 
 const dateOf = ts => { const d = new Date(ts); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 
@@ -76,6 +93,7 @@ export class Monitor extends EventEmitter {
    * @param {object} cfg        shared, normalised config (edited live by the UI)
    * @param {object} [opts]
    * @param {Function} [opts.createConnection]  (username, options) => connection; for tests
+   * @param {Function} [opts.peers]             () => other Monitors running in this process (live cross-checks)
    * @param {number} [opts.logLimit]            log lines kept in memory
    */
   constructor(username, cfg, opts = {}) {
@@ -83,7 +101,10 @@ export class Monitor extends EventEmitter {
     this.username = normalizeUsername(username);
     if (!this.username) throw new Error('no username given');
     this.cfg = cfg;
+    this.lists = roomLists(cfg, this.username); // this room's own watch list and blacklist
     this.createConnection = opts.createConnection ?? ((u, o) => new TikTokLiveConnection(u, o));
+    this.peers = opts.peers ?? (() => []);
+    this.crossFlagged = new Set(); // "user@room" pairs already announced
     this.logLimit = opts.logLimit ?? 1000;
     this.tracker = new ViewerTracker({ timeoutMs: cfg.idleTimeoutMinutes * 60_000, chatHistory: cfg.chatHistory });
     this.history = new RoomHistory(this.username, historyFile(cfg.dataDir, this.username));
@@ -200,6 +221,7 @@ export class Monitor extends EventEmitter {
       this._log(wasPresent ? 'rejoin' : 'join', `${wasPresent ? 're-joined' : 'joined'}`, u);
       this._maybeFlag(u);
       this._changed();
+      this.emit('join', { room: this.username, user: u.username });
     });
     conn.on(WebcastEvent.CHAT, d => {
       const w = who(d); if (!w) return;
@@ -301,10 +323,36 @@ export class Monitor extends EventEmitter {
   }
 
   // ---------- queries ----------
-  watched(username) { return this.cfg.watch.has(username.toLowerCase()); }
+  watched(username) { return this.lists.watch.has(username.toLowerCase()); }
+  presentNow(username) { return !!this.tracker.users.get(username)?.present; }
+
+  /** Other monitored rooms (excluding this one), optionally only blacklisted ones. */
+  _peers(blacklistedOnly = false) {
+    return [...this.peers()].filter(p => p !== this && p.username !== this.username && (!blacklistedOnly || this.lists.blacklist.has(p.username)));
+  }
+  /** Blacklisted rooms the user is in at this moment. */
+  liveIn(username) { return this._peers(true).filter(p => p.presentNow(username)).map(p => p.username); }
 
   assess(u, h = this.history.summary(u), now = Date.now()) {
-    return scoreUser(u, { history: h, rooms: this.roomIndex.lookup(u), blacklist: this.cfg.blacklist, timeInRoom: this.tracker.timeInRoom(u, now), now });
+    return scoreUser(u, { history: h, rooms: this.roomIndex.lookup(u), liveIn: this.liveIn(u.username), blacklist: this.lists.blacklist, timeInRoom: this.tracker.timeInRoom(u, now), now });
+  }
+
+  /**
+   * Called when `username` enters another monitored room. If that room is on this room's blacklist
+   * and the user is here as well, announce it (once per user and room per run).
+   */
+  peerJoined(room, username) {
+    if (!this.lists.blacklist.has(room) || !this.presentNow(username)) return;
+    const key = `${username}@${room}`;
+    if (this.crossFlagged.has(key)) return;
+    this.crossFlagged.add(key);
+    const u = this.tracker.users.get(username);
+    const a = this.assess(u);
+    const flag = { t: Date.now(), user: username, nickname: u.nickname, ...a };
+    this.flagged.set(username, flag);
+    this._log('flag', `just entered blacklisted @${room}'s room while here — score ${a.score}: ${a.reasons.join('; ')}`, u);
+    this.emit('flag', { room: this.username, ...flag });
+    this._changed();
   }
 
   refreshRoomIndex() { this.roomIndex = loadRoomIndex(this.cfg.dataDir, this.username); return this.roomIndex; }
@@ -313,9 +361,9 @@ export class Monitor extends EventEmitter {
   row(u, now = Date.now()) {
     const h = this.history.summary(u);
     const a = this.assess(u, h, now);
-    const created = u.accountCreated ?? h?.profile?.accountCreated ?? null;
+    const live = this.liveIn(u.username);
     const flags = [u.isAdmin && 'mod', u.isFollower && 'follower', u.followed && 'followed-live', h?.aliases?.length && 'renamed',
-      ...a.blacklisted.map(r => `BL:@${r}`), this.watched(u.username) && 'watch'].filter(Boolean);
+      ...live.map(r => `NOW:@${r}`), ...a.blacklisted.filter(r => !live.includes(r)).map(r => `BL:@${r}`), this.watched(u.username) && 'watch'].filter(Boolean);
     return {
       username: u.username, nickname: u.nickname, userId: u.userId, present: u.present,
       joins: u.joins, chats: u.chats, likes: u.likes, gifts: u.gifts, coins: u.coins, shares: u.shares,
@@ -323,8 +371,7 @@ export class Monitor extends EventEmitter {
       timeInRoom: this.tracker.timeInRoom(u, now),
       daysSeen: h?.daysSeen ?? 1, firstSeenEver: h?.firstSeenEver ?? u.firstSeen, lastSeenEver: h?.lastSeenEver ?? u.lastSeen,
       followers: u.followers ?? h?.profile?.followers ?? null, following: u.following ?? h?.profile?.following ?? null,
-      accountCreated: created, accountAgeDays: accountAgeDays(created, now),
-      verified: u.verified, bio: u.bio, privateAccount: u.privateAccount, gifterLevel: u.gifterLevel,
+      verified: u.verified, privateAccount: u.privateAccount, gifterLevel: u.gifterLevel,
       isFollower: u.isFollower, isAdmin: u.isAdmin, followed: u.followed,
       score: a.score, reasons: a.reasons, blacklisted: a.blacklisted, flags,
       aliases: h?.aliases ?? [], watched: this.watched(u.username),
@@ -357,10 +404,23 @@ export class Monitor extends EventEmitter {
       username: key.username, nickname: u?.nickname ?? rec?.nickname ?? null, seenToday: !!u,
       today: u ? this.row(u) : null,
       history: h,
-      rooms: this.roomIndex.lookup(key).map(r => ({ ...r, blacklisted: this.cfg.blacklist.has(r.room.toLowerCase()) })),
+      rooms: this._roomsFor(key),
       chat: u?.chatLog ?? [],
       flagged: this.flagged.get(key.username) ?? null,
     };
+  }
+
+  /** History entries for other rooms, merged with live presence in rooms monitored right now. */
+  _roomsFor(key) {
+    const rooms = this.roomIndex.lookup(key).map(r => ({ ...r, blacklisted: this.lists.blacklist.has(r.room.toLowerCase()), presentNow: false }));
+    for (const p of this._peers()) {
+      const present = p.presentNow(key.username);
+      const rec = p.tracker.users.get(key.username);
+      const existing = rooms.find(r => r.room === p.username);
+      if (existing) { existing.presentNow = present; if (rec?.isFollower === true) existing.follows = true; }
+      else if (rec) rooms.push({ room: p.username, username: key.username, follows: rec.isFollower, daysSeen: 1, lastSeen: rec.lastSeen, firstSeen: rec.firstSeen, blacklisted: this.lists.blacklist.has(p.username), presentNow: present });
+    }
+    return rooms.sort((a, b) => (b.presentNow - a.presentNow) || (b.blacklisted - a.blacklisted));
   }
 
   suspects(n = 20) { return this.rows().filter(r => r.score > 0).sort((a, b) => b.score - a.score).slice(0, n); }
@@ -388,14 +448,12 @@ export function who(d) {
   const u = d?.user; if (!u) return null;
   const username = u.displayId || u.uniqueId; if (!username) return null;
   const fi = u.followInfo ?? {};
-  const created = num(u.createTime);
+  // createTime and bioDescription exist in the schema but TikTok never fills them in LIVE events.
   return { username, info: {
     nickname: u.nickname, userId: u.id, isAdmin: !!u.userAttr?.isAdmin,
     isFollower: fi.followStatus !== undefined && fi.followStatus !== null && fi.followStatus !== '' ? Number(fi.followStatus) > 0 : undefined,
     followers: num(fi.followerCount), following: num(fi.followingCount),
-    accountCreated: created ? (created < 1e12 ? created * 1000 : created) : undefined, // seconds → ms
     verified: typeof u.verified === 'boolean' ? u.verified : undefined,
-    bio: typeof u.bioDescription === 'string' ? u.bioDescription : undefined,
     privateAccount: u.secret !== undefined && u.secret !== null ? Number(u.secret) > 0 : undefined,
     gifterLevel: num(u.payGrade?.level),
     secUid: u.secUid || undefined,

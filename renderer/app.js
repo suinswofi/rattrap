@@ -18,8 +18,9 @@ const fmtDateTime = ts => ts == null ? '–' : `${fmtDate(ts)} ${fmtTime(ts)}`;
 const dur = ms => { if (ms == null) return '–'; const s = Math.floor(ms / 1000); if (s < 60) return `${s}s`; if (s < 3600) return `${Math.floor(s / 60)}m`; return `${Math.floor(s / 3600)}h${pad2(Math.floor(s / 60) % 60)}m`; };
 const num = n => n == null ? '–' : Number(n).toLocaleString();
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const flagClass = f => f.startsWith('BL:') || f.startsWith('NOW:') ? 'bl' : esc(f);
 const scoreClass = s => s >= (state.config?.burnerAlertScore ?? 6) ? 'high' : s >= 3 ? 'mid' : '';
-const reasonClass = r => /blacklisted|previously named|account is|no followers|only \d+ followers/.test(r) ? 'strong' : /bio|private|username|nickname|follows nobody/.test(r) ? 'profile' : '';
+const reasonClass = r => /blacklisted|right now|previously named|no followers|only \d+ followers/.test(r) ? 'strong' : /private|username|nickname|follows nobody/.test(r) ? 'profile' : '';
 
 function toast(title, text, kind = '', ttl = 8000) {
   const el = document.createElement('div');
@@ -43,10 +44,15 @@ function renderRooms() {
   $('#empty').hidden = state.rooms.length > 0;
 }
 
+const roomLists = room => state.config?.lists?.[room] ?? { watch: [], blacklist: [] };
+
 function renderLists() {
+  const l = roomLists(state.current);
   const chips = (list, name) => list.map(n => `<li><span class="name">@${esc(n)}</span><button class="x" data-list="${name}" data-name="${esc(n)}" title="remove">×</button></li>`).join('');
-  $('#blacklist').innerHTML = chips(state.config?.blacklist ?? [], 'blacklist');
-  $('#watchlist').innerHTML = chips(state.config?.watch ?? [], 'watch');
+  $('#blacklist').innerHTML = chips(l.blacklist, 'blacklist') || (state.current ? '' : '<li class="sub">select a room</li>');
+  $('#watchlist').innerHTML = chips(l.watch, 'watch') || (state.current ? '' : '<li class="sub">select a room</li>');
+  for (const id of ['#blacklist-room', '#watchlist-room']) $(id).textContent = state.current ? `· @${state.current}` : '';
+  for (const f of ['#add-blacklist', '#add-watch']) for (const el of $(f).elements) el.disabled = !state.current;
 }
 
 // ---------- header ----------
@@ -89,8 +95,7 @@ const COLUMNS = [
   { key: 'daysSeen', label: 'Days', num: true, render: u => u.daysSeen },
   { key: 'firstSeenEver', label: 'First ever', render: u => fmtDate(u.firstSeenEver) },
   { key: 'followers', label: 'Flw / ing', num: true, render: u => u.followers == null ? '–' : `${num(u.followers)} / ${num(u.following)}` },
-  { key: 'accountAgeDays', label: 'Age', num: true, render: u => u.accountAgeDays == null ? '–' : `${u.accountAgeDays}d` },
-  { key: 'flags', label: 'Flags', render: u => u.flags.map(f => `<span class="flag ${f.startsWith('BL:') ? 'bl' : esc(f)}">${esc(f)}</span>`).join('') },
+  { key: 'flags', label: 'Flags', render: u => u.flags.map(f => `<span class="flag ${flagClass(f)}">${esc(f)}</span>`).join('') },
 ];
 
 function sortedUsers() {
@@ -123,7 +128,7 @@ function renderSuspects() {
     <div class="card" data-user="${esc(u.username)}">
       <span class="score ${scoreClass(u.score)}">${u.score}</span>
       <div class="who">${esc(u.username)}${u.nickname && u.nickname !== u.username ? `<span class="nick">${esc(u.nickname)}</span>` : ''}
-        ${u.flags.map(f => `<span class="flag ${f.startsWith('BL:') ? 'bl' : esc(f)}">${esc(f)}</span>`).join('')}</div>
+        ${u.flags.map(f => `<span class="flag ${flagClass(f)}">${esc(f)}</span>`).join('')}</div>
       <div class="reasons">${u.reasons.map(r => `<span class="reason ${reasonClass(r)}">${esc(r)}</span>`).join('')}</div>
     </div>`).join('') || '<p class="note">Nobody scored above 0.</p>';
 }
@@ -180,10 +185,10 @@ async function renderDetail() {
   if (!d) { $('#detail-nick').textContent = ''; $('#detail-body').innerHTML = '<p class="note">Not found.</p>'; return; }
   $('#detail-nick').textContent = d.nickname && d.nickname !== d.username ? d.nickname : '';
   const t = d.today, h = d.history, p = { ...(h?.profile ?? {}) };
-  if (t) for (const k of ['followers', 'following', 'accountCreated', 'verified', 'bio', 'privateAccount', 'gifterLevel']) if (t[k] != null) p[k] = t[k];
+  if (t) for (const k of ['followers', 'following', 'verified', 'privateAccount', 'gifterLevel']) if (t[k] != null) p[k] = t[k];
   const yn = v => v == null ? '–' : v ? 'yes' : 'no';
   const kv = pairs => `<dl class="kv">${pairs.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v}</dd>`).join('')}</dl>`;
-  const watched = state.config?.watch?.includes(d.username);
+  const watched = roomLists(state.current).watch.includes(d.username);
   const score = t ? `<div class="scorebox"><span class="score ${scoreClass(t.score)}">${t.score}</span><div class="reasons">${t.reasons.length ? t.reasons.map(r => `<span class="reason ${reasonClass(r)}">${esc(r)}</span>`).join('') : '<span class="none">nothing suspicious</span>'}</div></div>`
     : '<p class="note">Not seen today, so no score. Showing history only.</p>';
   const parts = [
@@ -192,16 +197,14 @@ async function renderDetail() {
     '<h4>Profile (as reported by TikTok)</h4>',
     kv([
       ['followers', num(p.followers)], ['following', num(p.following)],
-      ['account created', p.accountCreated ? `${fmtDate(p.accountCreated)} (${t?.accountAgeDays ?? Math.floor((Date.now() - p.accountCreated) / 864e5)} days)` : '–'],
       ['verified', yn(p.verified)], ['private', yn(p.privateAccount)], ['gifter level', p.gifterLevel ?? '–'],
-      ['bio', p.bio ? esc(p.bio) : p.bio === '' ? '<i>empty</i>' : '–'],
       ['follows this host', yn(t?.isFollower ?? h?.isFollower)], ['user id', esc(t?.userId ?? '–')],
     ]),
   ];
   if (t) parts.push('<h4>Today</h4>', kv([
     ['status', t.present ? 'in the room' : `gone${t.leftHow ? ` (${t.leftHow})` : ''}`], ['first seen', fmtTime(t.firstSeen)], ['last seen', fmtTime(t.lastSeen)],
     ['time in room', dur(t.timeInRoom)], ['joins', t.joins], ['chats', t.chats], ['likes', t.likes], ['gifts', `${t.gifts} (${t.coins} coins)`], ['shares', t.shares],
-    ['flags', t.flags.map(f => `<span class="flag ${f.startsWith('BL:') ? 'bl' : esc(f)}">${esc(f)}</span>`).join('') || '–'],
+    ['flags', t.flags.map(f => `<span class="flag ${flagClass(f)}">${esc(f)}</span>`).join('') || '–'],
   ]));
   if (h) parts.push('<h4>History in this room</h4>', kv([
     ['first seen ever', fmtDateTime(h.firstSeenEver)], ['last seen ever', fmtDateTime(h.lastSeenEver)],
@@ -211,11 +214,11 @@ async function renderDetail() {
     ['previous nicknames', h.nicknames.length ? esc(h.nicknames.join(', ')) : '–'],
   ]));
   parts.push('<h4>Other monitored rooms</h4>', d.rooms.length
-    ? `<ul class="rooms-list">${d.rooms.map(r => `<li class="${r.blacklisted ? 'bl' : ''}">@${esc(r.room)}${r.blacklisted ? ' <span class="flag bl">blacklisted</span>' : ''}: <span class="${r.follows === true ? 'follows' : 'nofollow'}">${r.follows === true ? 'FOLLOWS host' : r.follows === false ? 'does not follow host' : 'follow status unknown'}</span>, seen ${r.daysSeen} day${r.daysSeen === 1 ? '' : 's'}, last ${fmtDate(r.lastSeen)}${r.username !== d.username ? ` (as @${esc(r.username)})` : ''}</li>`).join('')}</ul>`
+    ? `<ul class="rooms-list">${d.rooms.map(r => `<li class="${r.blacklisted ? 'bl' : ''}">@${esc(r.room)}${r.blacklisted ? ' <span class="flag bl">blacklisted</span>' : ''}${r.presentNow ? ' <span class="flag bl">in the room right now</span>' : ''}: <span class="${r.follows === true ? 'follows' : 'nofollow'}">${r.follows === true ? 'FOLLOWS host' : r.follows === false ? 'does not follow host' : 'follow status unknown'}</span>, seen ${r.daysSeen} day${r.daysSeen === 1 ? '' : 's'}, last ${fmtDate(r.lastSeen)}${r.username !== d.username ? ` (as @${esc(r.username)})` : ''}</li>`).join('')}</ul>`
     : `<p class="note">Not seen in any other monitored room${state.snap?.otherRooms?.length ? '' : ' (no other room histories yet)'}.</p>`);
   if (d.chat.length) parts.push(`<h4>Recent chat (${d.chat.length})</h4>`, `<div class="chatlog">${d.chat.map(c => `<div class="line"><span class="t">${fmtTime(c.t)}</span><span class="m">${esc(c.text)}</span></div>`).join('')}</div>`);
   $('#detail-body').innerHTML = parts.join('');
-  $('#d-watch').onclick = async () => { await api.editList('watch', watched ? 'remove' : 'add', [d.username]); await loadConfig(); renderDetail(); };
+  $('#d-watch').onclick = async () => { await api.editList(state.current, 'watch', watched ? 'remove' : 'add', [d.username]); await loadConfig(); renderDetail(); };
   $('#d-open').onclick = () => api.openExternal(`https://www.tiktok.com/@${encodeURIComponent(d.username)}`);
 }
 
@@ -243,7 +246,7 @@ async function selectRoom(room) {
   closeDetail();
   if (!state.logs.has(room)) { try { state.logs.set(room, await api.log(room)); } catch { state.logs.set(room, []); } }
   if (!state.chats.has(room)) { try { state.chats.set(room, await api.chat(room)); } catch { state.chats.set(room, []); } }
-  renderRooms();
+  renderRooms(); renderLists();
   await refreshSnapshot();
   renderLog(); renderChat();
 }
@@ -277,7 +280,7 @@ api.onEvent(ev => {
       if (!state.current && state.rooms.length) selectRoom(state.rooms[0].room);
       break;
     case 'users': if (ev.room === state.current) scheduleRefresh(); break;
-    case 'lists': state.config = { ...state.config, watch: ev.watch, blacklist: ev.blacklist }; renderLists(); scheduleRefresh(); break;
+    case 'lists': state.config = { ...state.config, lists: { ...(state.config?.lists ?? {}), [ev.room]: { watch: ev.watch, blacklist: ev.blacklist } } }; renderLists(); scheduleRefresh(); break;
     case 'saved': if (ev.room === state.current) toast(`@${ev.room} saved`, `${ev.count} users written to today's snapshot and the room history`, 'ok', 4000); break;
   }
 });
@@ -291,15 +294,15 @@ $('#add-room').addEventListener('submit', async e => {
 });
 for (const [form, list] of [['#add-blacklist', 'blacklist'], ['#add-watch', 'watch']]) {
   $(form).addEventListener('submit', async e => {
-    e.preventDefault(); const input = e.target.querySelector('input'); const name = input.value.trim(); if (!name) return;
-    try { await api.editList(list, 'add', [name]); input.value = ''; await loadConfig(); scheduleRefresh(); }
+    e.preventDefault(); const input = e.target.querySelector('input'); const name = input.value.trim(); if (!name || !state.current) return;
+    try { await api.editList(state.current, list, 'add', [name]); input.value = ''; await loadConfig(); scheduleRefresh(); }
     catch (err) { toast('Could not update list', err.message, 'error'); }
     if (list === 'blacklist' && !state.rooms.some(r => r.room === name.replace(/^@/, '').toLowerCase())) toast('Blacklisted', `Add @${name.replace(/^@/, '')} as a room too, so Bouncer can record who follows them.`, '', 10000);
   });
 }
 document.addEventListener('click', async e => {
   const x = e.target.closest('button.x[data-list]');
-  if (x) { await api.editList(x.dataset.list, 'remove', [x.dataset.name]); await loadConfig(); scheduleRefresh(); return; }
+  if (x) { await api.editList(state.current, x.dataset.list, 'remove', [x.dataset.name]); await loadConfig(); scheduleRefresh(); return; }
   const row = e.target.closest('[data-user]');
   if (row && !e.target.closest('.side-list')) openDetail(row.dataset.user);
 });
@@ -318,7 +321,7 @@ $('#btn-save').addEventListener('click', async () => { try { await api.save(stat
 $('#btn-reconnect').addEventListener('click', () => api.reconnectRoom(state.current));
 $('#btn-remove').addEventListener('click', async () => {
   if (!state.current || !confirm(`Stop monitoring @${state.current}? Today's data is saved first.`)) return;
-  await api.removeRoom(state.current); state.current = null; await refreshRooms(); await refreshSnapshot(); renderLog(); renderChat();
+  await api.removeRoom(state.current); state.current = null; await refreshRooms(); await refreshSnapshot(); renderLists(); renderLog(); renderChat();
 });
 $('#btn-data').addEventListener('click', () => api.openData());
 

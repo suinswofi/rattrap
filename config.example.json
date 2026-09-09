@@ -1,8 +1,15 @@
 {
   "username": "the_great_sir_stromburg",
+  "rooms": [
+    "the_great_sir_stromburg"
+  ],
+  "lists": {
+    "the_great_sir_stromburg": {
+      "watch": [],
+      "blacklist": []
+    }
+  },
   "idleTimeoutMinutes": 15,
-  "watch": [],
-  "blacklist": [],
   "burnerAlertScore": 6,
   "signApiKey": "",
   "dataDir": "data",
@@ -13,4 +20,4 @@
   "chatHistory": 50,
   "logEvents": true,
   "logChat": false
-}
+}\n

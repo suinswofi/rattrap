@@ -18,13 +18,13 @@
     </section>
 
     <section class="side-section">
-      <h3>Blacklist <span class="hint" title="Streamers whose followers and viewers get flagged. Add their room above too, so Bouncer can record who follows them.">?</span></h3>
+      <h3>Blacklist <span class="for-room" id="blacklist-room"></span> <span class="hint" title="Per room. Streamers to cross-check against. Add their room above as well: anyone in this room who is also in their room right now, follows them, or has been seen there before gets flagged.">?</span></h3>
       <ul id="blacklist" class="side-list chips"></ul>
       <form id="add-blacklist" class="side-add"><input placeholder="add @streamer" autocomplete="off" spellcheck="false"><button type="submit">+</button></form>
     </section>
 
     <section class="side-section">
-      <h3>Watch list <span class="hint" title="Viewers whose joins, chats and gifts always pop up as alerts.">?</span></h3>
+      <h3>Watch list <span class="for-room" id="watchlist-room"></span> <span class="hint" title="Per room. Viewers whose joins, chats and gifts in this room always pop up as alerts.">?</span></h3>
       <ul id="watchlist" class="side-list chips"></ul>
       <form id="add-watch" class="side-add"><input placeholder="add @viewer" autocomplete="off" spellcheck="false"><button type="submit">+</button></form>
     </section>

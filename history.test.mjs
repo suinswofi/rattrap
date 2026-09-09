@@ -12,11 +12,11 @@ const DAY = 24 * 60 * MIN;
 
 test('tracker keeps profile fields and time in room', () => {
   const t = new ViewerTracker({ timeoutMs: 10 * MIN });
-  t.join('a', { followers: 0, following: 3, accountCreated: 1000 }, 0);
+  t.join('a', { followers: 0, following: 3, privateAccount: true }, 0);
   t.activity('a', { followers: 2 }, 'chat', { text: 'x' }, 3 * MIN);
   assert.equal(t.get('a').followers, 2);
   assert.equal(t.get('a').following, 3);
-  assert.equal(t.get('a').accountCreated, 1000);
+  assert.equal(t.get('a').privateAccount, true);
   assert.equal(t.timeInRoom(t.get('a'), 5 * MIN), 5 * MIN);
   t.sweep(20 * MIN); // left at last seen (3 min)
   assert.equal(t.timeInRoom(t.get('a'), 30 * MIN), 3 * MIN);
@@ -88,19 +88,19 @@ test('cross-room index reports follow status towards other hosts', () => {
 test('burner score adds up with reasons', () => {
   const now = 100 * DAY;
   const t = new ViewerTracker();
-  t.join('user8237461920', { userId: '1', nickname: 'user8237461920', followers: 0, following: 0, accountCreated: now - 2 * DAY, bio: '' }, now - 30_000);
+  t.join('user8237461920', { userId: '1', nickname: 'user8237461920', followers: 0, following: 0, privateAccount: true }, now - 30_000);
   const u = t.get('user8237461920');
   const r = scoreUser(u, { now, timeInRoom: 30_000, history: { daysSeen: 1, aliases: ['older'], profile: {} },
     rooms: [{ room: 'BadGuy', follows: true, daysSeen: 2 }, { room: 'fine', follows: true, daysSeen: 1 }], blacklist: new Set(['badguy']) });
-  const expected = WEIGHTS.followsBlacklisted + WEIGHTS.renamed + WEIGHTS.accountUnder7d + WEIGHTS.noFollowers + WEIGHTS.followsNobody
-    + WEIGHTS.defaultUsername + WEIGHTS.defaultNickname + WEIGHTS.noBio + WEIGHTS.newToRoom + WEIGHTS.lurker;
+  const expected = WEIGHTS.followsBlacklisted + WEIGHTS.renamed + WEIGHTS.noFollowers + WEIGHTS.followsNobody
+    + WEIGHTS.defaultUsername + WEIGHTS.defaultNickname + WEIGHTS.privateAccount + WEIGHTS.newToRoom + WEIGHTS.lurker;
   assert.equal(r.score, expected);
   assert.deepEqual(r.blacklisted, ['BadGuy']);
   assert.ok(r.reasons.some(x => x.includes('follows blacklisted @BadGuy')));
   assert.ok(!r.reasons.some(x => x.includes('@fine')));
 
   const t2 = new ViewerTracker();
-  t2.join('regular_jane', { userId: '2', nickname: 'Jane', followers: 500, following: 200, accountCreated: now - 700 * DAY, bio: 'hi' }, 0);
+  t2.join('regular_jane', { userId: '2', nickname: 'Jane', followers: 500, following: 200 }, 0);
   t2.activity('regular_jane', {}, 'chat', { text: 'hello' }, 1);
   const r2 = scoreUser(t2.get('regular_jane'), { now, timeInRoom: 60 * MIN, history: { daysSeen: 12, aliases: [], profile: {} } });
   assert.equal(r2.score, 0);

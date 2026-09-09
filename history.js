@@ -11,7 +11,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync } from 
 import { join as pathJoin, dirname, basename } from 'node:path';
 
 const DAY_FIELDS = ['joins', 'chats', 'likes', 'gifts', 'coins', 'shares', 'presentMs'];
-const PROFILE_FIELDS = ['followers', 'following', 'accountCreated', 'verified', 'bio', 'privateAccount', 'gifterLevel', 'secUid'];
+const PROFILE_FIELDS = ['followers', 'following', 'verified', 'privateAccount', 'gifterLevel', 'secUid'];
 
 export const historyFile = (dataDir, room) => pathJoin(dataDir, `history-${room}.json`);
 

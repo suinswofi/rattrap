@@ -5,7 +5,7 @@ import { mkdtempSync, rmSync, existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { WebcastEvent, ControlEvent } from 'tiktok-live-connector';
-import { Monitor, DEFAULTS, normalizeConfig, who } from './monitor.js';
+import { Monitor, DEFAULTS, normalizeConfig, configToJSON, roomLists, who } from './monitor.js';
 
 class FakeConnection extends EventEmitter {
   constructor() { super(); this.connected = false; }
@@ -15,18 +15,16 @@ class FakeConnection extends EventEmitter {
 }
 
 const DAY = 864e5;
-const user = (displayId, extra = {}) => ({ user: { displayId, id: extra.id ?? `id-${displayId}`, nickname: extra.nickname ?? `Nick ${displayId}`, followInfo: extra.followInfo, createTime: extra.createTime, bioDescription: extra.bio, secret: extra.secret, userAttr: extra.userAttr } });
-const cfgFor = dir => normalizeConfig({ ...DEFAULTS, dataDir: dir, autosaveMinutes: 0, blacklist: ['badguy'], watch: ['vip'] }, null);
+const user = (displayId, extra = {}) => ({ user: { displayId, id: extra.id ?? `id-${displayId}`, nickname: extra.nickname ?? `Nick ${displayId}`, followInfo: extra.followInfo, secret: extra.secret, userAttr: extra.userAttr } });
+const cfgFor = dir => normalizeConfig({ ...DEFAULTS, dataDir: dir, autosaveMinutes: 0, lists: { host: { blacklist: ['badguy'], watch: ['vip'] } } }, null);
 const tick = () => new Promise(r => setTimeout(r, 5));
 
 test('who() maps the v2 user shape', () => {
-  const w = who(user('alice', { followInfo: { followerCount: '12', followingCount: '3', followStatus: '1' }, createTime: '1700000000', bio: '', secret: 0 }));
+  const w = who(user('alice', { followInfo: { followerCount: '12', followingCount: '3', followStatus: '1' }, secret: 0 }));
   assert.equal(w.username, 'alice');
   assert.equal(w.info.followers, 12);
   assert.equal(w.info.following, 3);
   assert.equal(w.info.isFollower, true);
-  assert.equal(w.info.accountCreated, 1700000000000);
-  assert.equal(w.info.bio, '');
   assert.equal(w.info.privateAccount, false);
   assert.equal(who({}), null);
 });
@@ -48,9 +46,9 @@ test('monitor tracks events, flags burners, and saves history', async () => {
     assert.equal(m.room.title, 'test stream');
     assert.equal(m.room.viewers, 42);
 
-    conn.emit(WebcastEvent.MEMBER, { ...user('regular_jane', { nickname: 'Jane', followInfo: { followerCount: '900', followingCount: '100', followStatus: '1' }, createTime: String(Math.floor((Date.now() - 800 * DAY) / 1000)), bio: 'hello' }), memberCount: 43 });
+    conn.emit(WebcastEvent.MEMBER, { ...user('regular_jane', { nickname: 'Jane', followInfo: { followerCount: '900', followingCount: '100', followStatus: '1' } }), memberCount: 43 });
     conn.emit(WebcastEvent.CHAT, { ...user('regular_jane'), comment: 'hi there' });
-    conn.emit(WebcastEvent.MEMBER, user('user9988776655', { nickname: 'user9988776655', followInfo: { followerCount: '0', followingCount: '0', followStatus: '0' }, createTime: String(Math.floor((Date.now() - 2 * DAY) / 1000)), bio: '' }));
+    conn.emit(WebcastEvent.MEMBER, user('user9988776655', { nickname: 'user9988776655', followInfo: { followerCount: '0', followingCount: '0', followStatus: '0' }, secret: 1 }));
     conn.emit(WebcastEvent.GIFT, { ...user('regular_jane'), gift: { name: 'Rose', diamondCount: 1, type: 0 }, repeatCount: 3, repeatEnd: 1 });
     conn.emit(WebcastEvent.MEMBER, user('vip'));
 
@@ -115,5 +113,89 @@ test('monitor cross-references a blacklisted room and reconnects after a drop', 
     conn.emit(ControlEvent.DISCONNECTED, { code: 1006 });
     assert.equal(m.state, 'reconnecting');
     m.stop();
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('watch list and blacklist are per room; legacy global lists migrate', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'bouncer-'));
+  try {
+    const cfg = cfgFor(dir);
+    const badConn = new FakeConnection();
+    const bad = new Monitor('badguy', cfg, { createConnection: () => badConn });
+    bad.start(); await tick();
+    badConn.emit(WebcastEvent.MEMBER, user('fan', { id: 'F1', followInfo: { followerCount: '500', followingCount: '300', followStatus: '1' } }));
+    bad.stop();
+
+    // a different room with no blacklist of its own: the same fan is not flagged there
+    const otherConn = new FakeConnection();
+    const other = new Monitor('other', cfg, { createConnection: () => otherConn });
+    const otherFlags = [];
+    other.on('flag', f => otherFlags.push(f));
+    other.start(); await tick();
+    otherConn.emit(WebcastEvent.MEMBER, user('fan', { id: 'F1', followInfo: { followerCount: '500', followingCount: '300', followStatus: '0' } }));
+    otherConn.emit(WebcastEvent.MEMBER, user('vip'));
+    assert.equal(otherFlags.length, 0);
+    assert.equal(other.detail('fan').rooms[0].blacklisted, false);
+    assert.equal(other.watched('vip'), false);
+    other.stop();
+
+    // the host room blacklists badguy and watches vip
+    const hostConn = new FakeConnection();
+    const host = new Monitor('host', cfg, { createConnection: () => hostConn });
+    const hostFlags = [];
+    host.on('flag', f => hostFlags.push(f));
+    host.start(); await tick();
+    hostConn.emit(WebcastEvent.MEMBER, user('fan', { id: 'F1', followInfo: { followerCount: '500', followingCount: '300', followStatus: '0' } }));
+    assert.equal(hostFlags.length, 1);
+    assert.deepEqual(hostFlags[0].blacklisted, ['badguy']);
+    assert.equal(host.watched('vip'), true);
+    host.stop();
+
+    // legacy config: a single global watch/blacklist seeds every room's lists
+    const legacy = normalizeConfig({ ...DEFAULTS, dataDir: dir, watch: ['Old_VIP'], blacklist: ['@OldRival'] }, null);
+    assert.equal(legacy.watch, undefined);
+    assert.deepEqual([...roomLists(legacy, 'anyroom').blacklist], ['oldrival']);
+    assert.deepEqual([...roomLists(legacy, 'Another').watch], ['old_vip']);
+    const json = configToJSON(legacy);
+    assert.deepEqual(json.lists.anyroom, { watch: ['old_vip'], blacklist: ['oldrival'] });
+    assert.equal(json.legacyLists, undefined);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('a viewer in two monitored rooms at once is flagged both ways', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'bouncer-'));
+  try {
+    const cfg = cfgFor(dir);
+    const all = new Map();
+    const mk = name => { const c = new FakeConnection(); const m = new Monitor(name, cfg, { createConnection: () => c, peers: () => all.values() }); all.set(name, m); m.on('join', ({ user }) => { for (const o of all.values()) if (o !== m) o.peerJoined(name, user); }); return [m, c]; };
+    const [host, hostConn] = mk('host');
+    const [bad, badConn] = mk('badguy');
+    const flags = [];
+    host.on('flag', f => flags.push(f));
+    host.start(); bad.start(); await tick();
+
+    // 1. already in badguy's room, then joins host: flagged on join, with the live reason
+    badConn.emit(WebcastEvent.MEMBER, user('dual', { id: 'D1', nickname: 'Dual', followInfo: { followerCount: '800', followingCount: '20', followStatus: '0' } }));
+    hostConn.emit(WebcastEvent.MEMBER, user('dual', { id: 'D1', nickname: 'Dual', followInfo: { followerCount: '800', followingCount: '20', followStatus: '0' } }));
+    assert.equal(flags.length, 1);
+    assert.ok(flags[0].reasons.includes("in blacklisted @badguy's room right now"));
+    assert.ok(host.row(host.tracker.get('dual')).flags.includes('NOW:@badguy'));
+    const d = host.detail('dual');
+    assert.equal(d.rooms[0].room, 'badguy');
+    assert.equal(d.rooms[0].presentNow, true);
+
+    // 2. in host first, then walks into badguy's room: host is told
+    hostConn.emit(WebcastEvent.MEMBER, user('later', { id: 'L1', nickname: 'Later', followInfo: { followerCount: '800', followingCount: '20', followStatus: '1' } }));
+    assert.equal(flags.length, 1);
+    badConn.emit(WebcastEvent.MEMBER, user('later', { id: 'L1', nickname: 'Later' }));
+    assert.equal(flags.length, 2);
+    assert.equal(flags[1].user, 'later');
+    assert.ok(host.logLines.some(l => l.kind === 'flag' && l.user === 'later' && l.text.includes('just entered blacklisted @badguy')));
+    badConn.emit(WebcastEvent.MEMBER, user('later', { id: 'L1', nickname: 'Later' })); // re-join: no duplicate alert
+    assert.equal(flags.length, 2);
+
+    // 3. the blacklisted room itself does not flag host's viewers (its own blacklist is empty)
+    assert.equal(bad.flagged.size, 0);
+    host.stop(); bad.stop();
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });

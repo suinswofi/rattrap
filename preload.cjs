@@ -14,7 +14,7 @@ contextBridge.exposeInMainWorld('bouncer', {
   chat: room => ipcRenderer.invoke('room:chat', room),
   flags: room => ipcRenderer.invoke('room:flags', room),
   save: room => ipcRenderer.invoke('room:save', room),
-  editList: (list, op, names) => ipcRenderer.invoke('list:edit', list, op, names),
+  editList: (room, list, op, names) => ipcRenderer.invoke('list:edit', room, list, op, names),
   openData: () => ipcRenderer.invoke('open:data'),
   openExternal: url => ipcRenderer.invoke('open:external', url),
   onEvent: cb => {

@@ -26,7 +26,7 @@ import readline from 'node:readline';
 import { readFileSync, existsSync } from 'node:fs';
 import { join as pathJoin, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { Monitor, readConfigFile, normalizeConfig, normalizeUsername } from './monitor.js';
+import { Monitor, readConfigFile, normalizeConfig, normalizeUsername, nameSet, roomLists } from './monitor.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -55,8 +55,6 @@ try { cfg = readConfigFile(configFile); } catch (e) { console.error(`could not p
 if (args._[0]) cfg.username = args._[0];
 else if (process.env.TIKTOK_USER) cfg.username = process.env.TIKTOK_USER;
 if (args.timeout) cfg.idleTimeoutMinutes = Number(args.timeout);
-if (args.watch) cfg.watch = args.watch.split(',');
-if (args.blacklist) cfg.blacklist = args.blacklist.split(',');
 if (args.alert) cfg.burnerAlertScore = Number(args.alert);
 if (args.data) cfg.dataDir = args.data;
 if (args['no-resume']) cfg.resume = false;
@@ -65,6 +63,9 @@ if (args.chat) cfg.logChat = true;
 cfg.signApiKey = args.key || process.env.EULER_API_KEY || process.env.SIGN_API_KEY || cfg.signApiKey || '';
 try { normalizeConfig(cfg, HERE); } catch (e) { console.error(e.message); process.exit(1); }
 if (!cfg.username) { console.error('no username given (argument, config.json or TIKTOK_USER)'); process.exit(1); }
+const lists = roomLists(cfg, cfg.username); // this room's watch list and blacklist
+if (args.watch) lists.watch = nameSet(args.watch.split(','));
+if (args.blacklist) lists.blacklist = nameSet(args.blacklist.split(','));
 
 let logEvents = cfg.logEvents;
 let logChat = cfg.logChat;
@@ -90,7 +91,6 @@ function table(rows) {
     first: timeOnly(u.firstSeen), last: timeOnly(u.lastSeen), inRoom: shortDur(u.timeInRoom),
     days: String(u.daysSeen), firstEver: dateOnly(u.firstSeenEver),
     'flw/ing': u.followers === null ? '-' : `${u.followers}/${u.following ?? '?'}`,
-    age: u.accountAgeDays === null ? '-' : `${u.accountAgeDays}d`,
     score: String(u.score), flags: u.flags.join(','),
   }));
   const cols = Object.keys(out[0]);
@@ -162,7 +162,7 @@ const commands = {
     if (d.today) {
       const t = d.today;
       console.log({ ...t, reasons: undefined, firstSeen: fmt(t.firstSeen), lastSeen: fmt(t.lastSeen), firstLeft: fmt(t.firstLeft), lastLeft: fmt(t.lastLeft),
-        timeInRoom: shortDur(t.timeInRoom), firstSeenEver: fmt(t.firstSeenEver), lastSeenEver: fmt(t.lastSeenEver), accountCreated: fmt(t.accountCreated) });
+        timeInRoom: shortDur(t.timeInRoom), firstSeenEver: fmt(t.firstSeenEver), lastSeenEver: fmt(t.lastSeenEver) });
       if (d.chat.length) { console.log(`recent chat (${d.chat.length}):`); for (const c of d.chat) console.log(`  ${timeOnly(c.t)}  ${c.text}`); }
     } else console.log(`(not seen today; showing history for ${d.username})`);
     const h = d.history;
@@ -191,21 +191,21 @@ const commands = {
     const idx = monitor.refreshRoomIndex();
     if (!id) {
       if (!idx.rooms.length) return console.log(`(no other room histories in ${cfg.dataDir}; run "node viewers.mjs <streamer>" to build one)`);
-      return console.log(`other rooms with history: ${idx.rooms.map(r => `@${r}${cfg.blacklist.has(r.toLowerCase()) ? ' [blacklisted]' : ''}`).join(', ')}`);
+      return console.log(`other rooms with history: ${idx.rooms.map(r => `@${r}${lists.blacklist.has(r.toLowerCase()) ? ' [blacklisted]' : ''}`).join(', ')}`);
     }
-    const d = monitor.detail(id) ?? { username: normalizeUsername(id), rooms: idx.lookup({ username: normalizeUsername(id) }).map(r => ({ ...r, blacklisted: cfg.blacklist.has(r.room.toLowerCase()) })) };
+    const d = monitor.detail(id) ?? { username: normalizeUsername(id), rooms: idx.lookup({ username: normalizeUsername(id) }).map(r => ({ ...r, blacklisted: lists.blacklist.has(r.room.toLowerCase()) })) };
     if (!d.rooms.length) return console.log(`${d.username}: not seen in any other monitored room`);
     for (const r of d.rooms) console.log(`  @${r.room}${r.blacklisted ? ' [BLACKLISTED]' : ''}: ${r.follows === true ? 'FOLLOWS host' : r.follows === false ? 'does not follow host' : 'follow status unknown'}, seen ${r.daysSeen} day${r.daysSeen === 1 ? '' : 's'}, last ${fmt(r.lastSeen)}${r.username !== d.username ? ` (as @${r.username})` : ''}`);
   },
   blacklist(a) {
     const [op, ...names] = a.split(/[\s,]+/).filter(Boolean);
     const clean = names.map(normalizeUsername).filter(Boolean);
-    if (op === 'add') for (const w of clean) cfg.blacklist.add(w);
-    else if (op === 'rm' || op === 'remove') for (const w of clean) cfg.blacklist.delete(w);
+    if (op === 'add') for (const w of clean) lists.blacklist.add(w);
+    else if (op === 'rm' || op === 'remove') for (const w of clean) lists.blacklist.delete(w);
     else if (op) return console.log('usage: blacklist [add|rm <user…>]');
     const known = monitor.refreshRoomIndex().rooms.map(r => r.toLowerCase());
-    const missing = [...cfg.blacklist].filter(b => !known.includes(b));
-    console.log(cfg.blacklist.size ? `blacklisted: ${[...cfg.blacklist].map(b => '@' + b).join(', ')}` : '(blacklist empty — "blacklist add <streamer>")');
+    const missing = [...lists.blacklist].filter(b => !known.includes(b));
+    console.log(lists.blacklist.size ? `blacklisted: ${[...lists.blacklist].map(b => '@' + b).join(', ')}` : '(blacklist empty — "blacklist add <streamer>")');
     if (missing.length) console.log(`no history yet for ${missing.map(b => '@' + b).join(', ')}: run "node viewers.mjs ${missing[0]}" while they are live to record their viewers and followers`);
     if (op) console.log('(edit config.json to make this permanent)');
   },
@@ -220,18 +220,18 @@ const commands = {
     table(monitor.top(field, Number(n) || 20));
   },
   watch(a) {
-    for (const w of a.split(/[\s,]+/).map(normalizeUsername).filter(Boolean)) cfg.watch.add(w);
-    console.log(cfg.watch.size ? `watching: ${[...cfg.watch].join(', ')}` : '(watch list empty — "watch <user>" to add)');
+    for (const w of a.split(/[\s,]+/).map(normalizeUsername).filter(Boolean)) lists.watch.add(w);
+    console.log(lists.watch.size ? `watching: ${[...lists.watch].join(', ')}` : '(watch list empty — "watch <user>" to add)');
   },
-  unwatch(a) { for (const w of a.split(/[\s,]+/).map(normalizeUsername).filter(Boolean)) cfg.watch.delete(w); commands.watch(''); },
+  unwatch(a) { for (const w of a.split(/[\s,]+/).map(normalizeUsername).filter(Boolean)) lists.watch.delete(w); commands.watch(''); },
   stats() {
     const s = monitor.snapshot();
     console.log(`room: @${s.room}${s.id ? ` (${s.id})` : ''}   ${s.live ? `LIVE, connected ${dur(Date.now() - s.connectedAt)}` : `${s.state} (${s.stateMessage})`}   monitor up ${dur(s.uptime)}
 title: ${s.title ?? '-'}
 viewers now: ${s.viewers ?? '?'}   total viewers (tiktok): ${s.totalViewers ?? '?'}   likes: ${s.likes ?? '?'}
 tracked: ${s.counts.seen} users seen, ${s.counts.present} believed present, ${s.counts.chatted} chatted, ${s.counts.gifted} gifted, ${s.counts.flagged} flagged
-history: ${s.counts.known} users ever seen here   other rooms: ${s.otherRooms.length}   blacklist: ${[...cfg.blacklist].join(', ') || '-'}   alert at score: ${cfg.burnerAlertScore}
-idle timeout: ${cfg.idleTimeoutMinutes}m   autosave: ${cfg.autosaveMinutes ? `every ${cfg.autosaveMinutes}m` : 'off'}   watch: ${[...cfg.watch].join(', ') || '-'}`);
+history: ${s.counts.known} users ever seen here   other rooms: ${s.otherRooms.length}   blacklist: ${[...lists.blacklist].join(', ') || '-'}   alert at score: ${cfg.burnerAlertScore}
+idle timeout: ${cfg.idleTimeoutMinutes}m   autosave: ${cfg.autosaveMinutes ? `every ${cfg.autosaveMinutes}m` : 'off'}   watch: ${[...lists.watch].join(', ') || '-'}`);
   },
   log(v) { logEvents = v !== 'off'; console.log(`event log ${logEvents ? 'on' : 'off'}`); },
   logchat(v) { logChat = v !== 'off'; console.log(`chat log ${logChat ? 'on' : 'off'}`); },
@@ -259,7 +259,7 @@ rl.on('line', line => {
 rl.on('close', quit);
 process.on('SIGINT', quit);
 
-console.log(`Bouncer — @${monitor.username}  (idle timeout ${cfg.idleTimeoutMinutes}m${cfg.watch.size ? `, watching ${[...cfg.watch].join(', ')}` : ''})`);
+console.log(`Bouncer — @${monitor.username}  (idle timeout ${cfg.idleTimeoutMinutes}m${lists.watch.size ? `, watching ${[...lists.watch].join(', ')}` : ''})`);
 monitor.start();
 rl.prompt();
 promptShown = true;

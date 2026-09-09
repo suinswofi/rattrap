@@ -5,7 +5,7 @@ import { app, BrowserWindow, ipcMain, shell, dialog } from 'electron';
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { Monitor, readConfigFile, normalizeConfig, configToJSON, normalizeUsername, nameSet } from './monitor.js';
+import { Monitor, readConfigFile, normalizeConfig, configToJSON, normalizeUsername, nameSet, roomLists } from './monitor.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 // Running from the repo: config.json and data/ live next to the code. Packaged (AppImage, installer):
@@ -43,8 +43,9 @@ function addRoom(name) {
   const room = normalizeUsername(name);
   if (!room) throw new Error('empty username');
   if (monitors.has(room)) return roomSummary(monitors.get(room));
-  const m = new Monitor(room, cfg);
+  const m = new Monitor(room, cfg, { peers: () => monitors.values() });
   monitors.set(room, m);
+  m.on('join', ({ user }) => { for (const other of monitors.values()) if (other !== m) other.peerJoined(room, user); });
   m.on('log', entry => send({ type: 'log', room, entry }));
   m.on('status', s => send({ type: 'status', ...s, rooms: roomList() }));
   m.on('flag', f => send({ type: 'flag', ...f }));
@@ -95,12 +96,13 @@ ipcMain.handle('room:log', (_e, name) => getMonitor(name).logLines);
 ipcMain.handle('room:chat', (_e, name) => getMonitor(name).recentChat);
 ipcMain.handle('room:flags', (_e, name) => [...getMonitor(name).flagged.values()]);
 ipcMain.handle('room:save', (_e, name) => getMonitor(name).save());
-ipcMain.handle('list:edit', (_e, list, op, names) => {
+ipcMain.handle('list:edit', (_e, room, list, op, names) => {
   if (!['watch', 'blacklist'].includes(list)) throw new Error('unknown list');
-  const set = cfg[list];
+  const lists = roomLists(cfg, room);
+  const set = lists[list];
   for (const n of nameSet(Array.isArray(names) ? names : String(names).split(/[\s,]+/))) op === 'remove' ? set.delete(n) : set.add(n);
   saveConfig();
-  send({ type: 'lists', watch: [...cfg.watch], blacklist: [...cfg.blacklist] });
+  send({ type: 'lists', room: normalizeUsername(room), watch: [...lists.watch], blacklist: [...lists.blacklist] });
   return [...set];
 });
 ipcMain.handle('open:data', () => shell.openPath(cfg.dataDir));

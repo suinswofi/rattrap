@@ -29,8 +29,8 @@ export class ViewerTracker {
         isAdmin: false, isFollower: null,
         presentMs: 0, sessionStart: null, // time spent in the room (completed visits) and start of the current visit
         // profile fields TikTok attaches to events (null = never delivered)
-        secUid: null, followers: null, following: null, accountCreated: null,
-        verified: null, bio: null, privateAccount: null, gifterLevel: null,
+        secUid: null, followers: null, following: null,
+        verified: null, privateAccount: null, gifterLevel: null,
         chatLog: [], // most recent {t, text}
     };
   }
@@ -42,7 +42,7 @@ export class ViewerTracker {
     if (info?.userId) u.userId = info.userId;
     if (info?.isAdmin) u.isAdmin = true;
     if (typeof info?.isFollower === 'boolean') u.isFollower = info.isFollower;
-    for (const k of ['secUid', 'followers', 'following', 'accountCreated', 'verified', 'bio', 'privateAccount', 'gifterLevel']) {
+    for (const k of ['secUid', 'followers', 'following', 'verified', 'privateAccount', 'gifterLevel']) {
       if (info?.[k] !== undefined && info[k] !== null) u[k] = info[k];
     }
     return u;
