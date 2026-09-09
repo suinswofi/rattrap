@@ -6,14 +6,12 @@ auto-generated names, drive-by visits, renamed accounts, and viewers who follow 
 have blacklisted. It exists to help a streamer work out which accounts are likely burners used
 to file bogus abuse reports.
 
-Bouncer is an Electron desktop app with a Twitch-style dark interface. The same engine also runs
-at a terminal prompt for headless use.
+Bouncer is an Electron desktop app with a Twitch-style dark interface.
 
 ```sh
 npm install
-npm start                        # desktop app, opens the rooms saved in config.json
+npm start                        # opens the rooms saved in config.json
 npm start -- someone_else        # also open @someone_else for this session only
-npm run cli -- someone_else      # terminal client instead of the GUI
 npm test
 ```
 
@@ -52,8 +50,7 @@ These files live in `data/`:
 
 - **Daily snapshots** `viewers-<room>-<date>.json`: everything seen today, including recent chat.
 - **Chat and event logs** `chat-<room>-<date>.txt` and `log-<room>-<date>.txt`, one line per
-  message or event, written live when the matching option is on in Settings (or `--chat-file`
-  / `--log-file` in the terminal client).
+  message or event, written live when the matching option is on in Settings.
 - **Room history** `history-<room>.json`: one record per account ever seen in that room, keyed by
   TikTok user id, with per-day activity (joins, chats, likes, gifts, coins, shares, time in room),
   first/last seen ever, previous usernames and nicknames, follow status towards the host, and the
@@ -140,55 +137,35 @@ opens it. Running from the repo uses the files next to the code.
 ## Configuration
 
 `config.json` next to the app when running from the repo, or in the app data folder when
-packaged (all keys optional; copy `config.example.json` to start). The GUI edits it for you; the terminal client
-takes the flags shown in brackets.
+packaged (all keys optional; copy `config.example.json` to start). The app edits it for you.
 
 | key                  | default                    | meaning |
 |----------------------|----------------------------|---------|
 | `rooms`              | `[]`                       | rooms the app opens on start; falls back to `username` |
-| `username`           | `the_great_sir_stromburg`  | default room for the terminal client (first argument, or env `TIKTOK_USER`) |
-| `idleTimeoutMinutes` | `15`                       | inactivity after which a viewer is assumed gone (`--timeout`) |
-| `lists`              | `{}`                       | per room: `{ "<room>": { "watch": [...], "blacklist": [...], "pinned": [...] } }`. Terminal client: `--watch a,b`, `--blacklist a,b` for its room |
-| `burnerAlertScore`   | `6`                        | score at which a join is announced (`--alert n`) |
-| `signApiKey`         | `""`                       | optional Euler Stream API key for higher connect limits (`--key`, env `EULER_API_KEY`) |
-| `dataDir`            | `data`                     | snapshot and history directory (`--data`) |
+| `username`           | `the_great_sir_stromburg`  | room opened when `rooms` is empty |
+| `idleTimeoutMinutes` | `15`                       | inactivity after which a viewer is assumed gone |
+| `lists`              | `{}`                       | per room: `{ "<room>": { "watch": [...], "blacklist": [...], "pinned": [...] } }` |
+| `burnerAlertScore`   | `6`                        | score at which a join is announced |
+| `signApiKey`         | `""`                       | optional Euler Stream API key for higher connect limits |
+| `dataDir`            | `data`                     | snapshot and history directory |
 | `autosaveMinutes`    | `5`                        | autosave interval, `0` to disable |
-| `resume`             | `true`                     | load today's snapshot on start (`--no-resume`) |
+| `resume`             | `true`                     | load today's snapshot on start |
 | `reconnectWhenLive`  | `true`                     | if offline, wait for the stream instead of giving up |
 | `livePollSeconds`    | `60`                       | how often to check for the stream while waiting (min 30) |
 | `chatHistory`        | `50`                       | recent chat messages kept per user |
-| `pruneAfterDays`     | `0`                        | forget accounts not seen for this many days; `0` keeps them forever (`--prune n`). Pinned and watched accounts are kept |
-| `logEvents`          | `true`                     | terminal client: print joins/leaves/gifts (`--quiet` to start off) |
-| `logChat`            | `false`                    | terminal client: also print every chat message (`--chat`) |
-| `chatToFile`         | `false`                    | append every chat message to `data/chat-<room>-<date>.txt` (`--chat-file`) |
-| `eventsToFile`       | `false`                    | append the event log to `data/log-<room>-<date>.txt` (`--log-file`) |
-
-## Terminal client
-
-`node viewers.mjs [username] [flags]` gives the same monitor at a prompt. Commands:
-
-```
-list / present / find <text> / show <user> / score <user>
-suspects [n]         today's users ranked by burner score, with reasons
-pin / unpin <user…>  keep accounts on the suspects list when clearing
-dismiss <user…>|all  hide accounts from the suspects list until they join again
-rooms [user]         other rooms with history files; with a user: where else they were seen
-blacklist [add|rm <user…>]
-chat [n] / top [chats|likes|coins|gifts|joins] [n]
-watch [user…] / unwatch <user> / stats / log on|off / logchat on|off
-save [file] / reconnect / quit
-```
+| `pruneAfterDays`     | `0`                        | forget accounts not seen for this many days; `0` keeps them forever. Pinned and watched accounts are kept |
+| `chatToFile`         | `false`                    | append every chat message to `data/chat-<room>-<date>.txt` |
+| `eventsToFile`       | `false`                    | append the event log to `data/log-<room>-<date>.txt` |
 
 ## Layout
 
 | file | role |
 |---|---|
 | `main.js`, `preload.cjs`, `renderer/` | Electron app: main process, IPC bridge, HTML/CSS/JS interface |
-| `monitor.js` | one room: connection, events, scoring, saving; no UI |
+| `monitor.js` | one room: connection, events, scoring, saving; no UI (also the engine the tests drive) |
 | `tracker.js` | today's presence and activity per viewer |
 | `history.js` | cross-day, cross-room memory |
 | `burner.js` | scoring heuristics and weights |
-| `viewers.mjs` | terminal client |
 
 ## Accuracy
 

@@ -17,7 +17,5 @@
   "resume": true,
   "reconnectWhenLive": true,
   "livePollSeconds": 60,
-  "chatHistory": 50,
-  "logEvents": true,
-  "logChat": false
-}\n
+  "chatHistory": 50
+}

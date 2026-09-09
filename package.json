@@ -12,7 +12,6 @@
   },
   "scripts": {
     "start": "electron .",
-    "cli": "node viewers.mjs",
     "test": "node --test",
     "dist": "electron-builder --linux --win",
     "dist:linux": "electron-builder --linux",

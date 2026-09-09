@@ -24,7 +24,7 @@ import { scoreUser } from './burner.js';
 
 export const DEFAULTS = {
   username: 'the_great_sir_stromburg',
-  rooms: [],                 // rooms the GUI opens on start (falls back to `username`)
+  rooms: [],                 // rooms opened on start (falls back to `username`)
   idleTimeoutMinutes: 15,
   lists: {},                 // per room: { "<room>": { watch: [...], blacklist: [...], pinned: [...] } }
   burnerAlertScore: 6,
@@ -36,8 +36,6 @@ export const DEFAULTS = {
   livePollSeconds: 60,
   chatHistory: 50,
   pruneAfterDays: 0,         // forget accounts not seen for this many days (0 = keep forever); pinned/watched are kept
-  logEvents: true,
-  logChat: false,
   chatToFile: false,         // append every chat message to data/chat-<room>-<date>.txt
   eventsToFile: false,       // append the event log (joins, leaves, gifts, flags…) to data/log-<room>-<date>.txt
 };
@@ -59,6 +57,7 @@ export function normalizeConfig(cfg, baseDir) {
   // Older configs had one global watch/blacklist; they become the starting lists of every room.
   cfg.legacyLists = { watch: nameSet(cfg.watch), blacklist: nameSet(cfg.blacklist) };
   delete cfg.watch; delete cfg.blacklist;
+  delete cfg.logEvents; delete cfg.logChat; // terminal-client keys from older versions
   const lists = {};
   for (const [room, l] of Object.entries(cfg.lists ?? {})) {
     const r = normalizeUsername(room); if (!r) continue;
