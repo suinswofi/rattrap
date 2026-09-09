@@ -328,3 +328,27 @@ test('old accounts are pruned from history when enabled, except pinned and watch
     m.stop();
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('today\'s list is capped at maxUsers, trimming the oldest that left', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'rattrap-'));
+  try {
+    const cfg = normalizeConfig({ ...DEFAULTS, dataDir: dir, autosaveMinutes: 0, idleTimeoutMinutes: 1, maxUsers: 6, lists: { host: { watch: ['keeper'] } } }, null);
+    const conn = new FakeConnection();
+    const m = new Monitor('host', cfg, { createConnection: () => conn });
+    m.start(); await tick();
+    const t0 = Date.now() - 10 * 60_000;
+    // eight accounts that all joined ten minutes ago, in order; then the sweep marks them gone
+    for (let i = 0; i < 8; i++) conn.emit(WebcastEvent.MEMBER, { ...user(i === 2 ? 'keeper' : `old${i}`), common: { createTime: String(t0 + i * 1000) } });
+    assert.equal(m.tracker.users.size, 8); // nobody has left yet, so nothing can be trimmed
+    m.tracker.sweep(Date.now());
+    conn.emit(WebcastEvent.MEMBER, user('newcomer'));
+    const names = [...m.tracker.users.keys()];
+    assert.ok(names.length <= 6, `expected at most 6, got ${names.length}`);
+    assert.ok(names.includes('newcomer'), 'the present newcomer stays');
+    assert.ok(names.includes('keeper'), 'watched accounts are never trimmed');
+    assert.ok(!names.includes('old0') && !names.includes('old1'), 'the oldest gone accounts go first');
+    assert.ok(m.history.get('old0'), 'trimmed accounts were written to history');
+    assert.ok(m.logLines.some(l => l.text.includes('trimmed')));
+    m.stop();
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});

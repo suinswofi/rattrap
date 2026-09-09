@@ -84,7 +84,7 @@ const getMonitor = name => {
 // ---------- IPC ----------
 ipcMain.handle('config:get', () => ({ ...configToJSON(cfg), configFile: CONFIG_FILE }));
 ipcMain.handle('config:set', (_e, patch) => {
-  const allowed = ['idleTimeoutMinutes', 'burnerAlertScore', 'autosaveMinutes', 'signApiKey', 'reconnectWhenLive', 'livePollSeconds', 'chatHistory', 'resume', 'chatToFile', 'eventsToFile', 'pruneAfterDays'];
+  const allowed = ['idleTimeoutMinutes', 'burnerAlertScore', 'autosaveMinutes', 'signApiKey', 'reconnectWhenLive', 'livePollSeconds', 'chatHistory', 'resume', 'chatToFile', 'eventsToFile', 'pruneAfterDays', 'maxUsers'];
   const next = { ...cfg };
   for (const k of allowed) if (patch && patch[k] !== undefined) next[k] = patch[k];
   normalizeConfig(next, null); // throws on bad values; dataDir already absolute
@@ -135,7 +135,7 @@ function createWindow() {
   if (process.env.RATTRAP_SCREENSHOT) {
     win.webContents.once('did-finish-load', () => setTimeout(async () => {
       try {
-        if (process.env.RATTRAP_SCREENSHOT_JS) { await win.webContents.executeJavaScript(process.env.RATTRAP_SCREENSHOT_JS); await new Promise(r => setTimeout(r, 800)); }
+        if (process.env.RATTRAP_SCREENSHOT_JS) { const r = await win.webContents.executeJavaScript(process.env.RATTRAP_SCREENSHOT_JS); if (r !== undefined) console.log('screenshot js:', r); await new Promise(r => setTimeout(r, 800)); }
         const img = await win.webContents.capturePage(); writeFileSync(process.env.RATTRAP_SCREENSHOT, img.toPNG());
       }
       catch (e) { console.error('screenshot failed:', e.message); }

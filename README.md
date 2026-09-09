@@ -28,7 +28,7 @@ npm test
   waiting for them to go live, purple = connecting) and present/seen counts. Add a room with the
   box below the list. Rooms added here are remembered in `config.json`.
 - **Blacklist** and **Watch list** (sidebar): one pair per room, edited in place, saved immediately.
-- **Users** tab: everyone seen today. Click a column to sort, drag a header edge to resize it
+- **Users** tab: everyone seen today (only the rows in view are drawn, so large rooms stay quick). Click a column to sort, drag a header edge to resize it
   (double-click the edge to reset; widths are remembered), type to search, tick "present only".
   Long names are cut with an ellipsis; hover to see the full name. Click a row for the drawer.
 - **Suspects** tab: today's users ranked by burner score with the reasons spelled out. Tag chips
@@ -168,6 +168,7 @@ packaged (all keys optional; copy `config.example.json` to start). The app edits
 | `livePollSeconds`    | `60`                       | how often to check for the stream while waiting (min 30) |
 | `chatHistory`        | `50`                       | recent chat messages kept per user |
 | `pruneAfterDays`     | `0`                        | forget accounts not seen for this many days; `0` keeps them forever. Pinned and watched accounts are kept |
+| `maxUsers`           | `10000`                    | cap on today's list per room; over it, the oldest accounts that already left are trimmed (they stay in history). `0` = unlimited |
 | `chatToFile`         | `false`                    | append every chat message to `data/chat-<room>-<date>.txt` |
 | `eventsToFile`       | `false`                    | append the event log to `data/log-<room>-<date>.txt` |
 

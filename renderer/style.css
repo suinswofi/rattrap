@@ -128,6 +128,7 @@ body.resizing tbody tr:hover td { background: inherit; }
 thead th.sorted { color: var(--purple-light); }
 thead th.num, td.num { text-align: right; font-variant-numeric: tabular-nums; }
 tbody td { padding: 6px 10px; border-bottom: 1px solid var(--border); color: var(--muted); overflow: hidden; text-overflow: ellipsis; }
+tbody tr.spacer td { padding: 0; border: 0; }
 tbody tr { cursor: pointer; }
 tbody tr:hover td { background: var(--hover); }
 tbody tr.selected td { background: var(--purple-dim); }

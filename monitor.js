@@ -36,6 +36,7 @@ export const DEFAULTS = {
   livePollSeconds: 60,
   chatHistory: 50,
   pruneAfterDays: 0,         // forget accounts not seen for this many days (0 = keep forever); pinned/watched are kept
+  maxUsers: 10000,           // cap on today's list; the oldest accounts that already left are trimmed (kept in history)
   chatToFile: false,         // append every chat message to data/chat-<room>-<date>.txt
   eventsToFile: false,       // append the event log (joins, leaves, gifts, flags…) to data/log-<room>-<date>.txt
 };
@@ -72,6 +73,7 @@ export function normalizeConfig(cfg, baseDir) {
   cfg.livePollSeconds = Math.max(30, Number(cfg.livePollSeconds) || 60);
   cfg.chatHistory = Math.max(1, Number(cfg.chatHistory) || 50);
   cfg.pruneAfterDays = Math.max(0, Number(cfg.pruneAfterDays) || 0);
+  cfg.maxUsers = Math.max(0, Math.floor(Number(cfg.maxUsers)) || 0); // 0 = unlimited
   cfg.signApiKey = String(cfg.signApiKey ?? '');
   if (baseDir && !isAbsolute(cfg.dataDir)) cfg.dataDir = pathJoin(baseDir, cfg.dataDir);
   return cfg;
@@ -328,9 +330,28 @@ export class Monitor extends EventEmitter {
   }
 
   _changed() {
+    if (this.cfg.maxUsers > 0 && this.tracker.users.size > this.cfg.maxUsers) this._trimUsers();
     if (this._changeTimer) return;
     this._changeTimer = setTimeout(() => { this._changeTimer = null; this.emit('users'); }, 500);
     this._changeTimer.unref?.();
+  }
+
+  /**
+   * Today's list is over cfg.maxUsers: drop the oldest accounts that have already left (never
+   * present, pinned or watched ones) down to 95% of the cap. Their day is written to history first,
+   * so only today's row goes; if they come back today they start a fresh row.
+   */
+  _trimUsers(now = Date.now()) {
+    const max = this.cfg.maxUsers;
+    const excess = this.tracker.users.size - Math.floor(max * 0.95);
+    if (excess <= 0) return 0;
+    const gone = [...this.tracker.users.values()].filter(u => !u.present && !this.pinned(u.username) && !this.watched(u.username)).sort((a, b) => a.lastSeen - b.lastSeen);
+    const evict = gone.slice(0, excess);
+    if (!evict.length) return 0;
+    this.history.update(evict, this.sessionDate ?? dateOf(now), now);
+    for (const u of evict) this.tracker.users.delete(u.username);
+    this._log('system', `list is over ${max} accounts: trimmed the ${evict.length} oldest that had left (they stay in history)`);
+    return evict.length;
   }
 
   _log(kind, text, u = null, extra = {}) {

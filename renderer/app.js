@@ -55,9 +55,9 @@ async function goToUser(room, user) {
     setTab('users');
   }
   await openDetail(user);
-  const el = document.querySelector(onSuspects ? `#suspects-list .card[data-user="${CSS.escape(user)}"]` : `#users-table tbody tr[data-user="${CSS.escape(user)}"]`);
+  const el = onSuspects ? document.querySelector(`#suspects-list .card[data-user="${CSS.escape(user)}"]`) : scrollTableTo(user);
   if (el) {
-    el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    if (onSuspects) el.scrollIntoView({ block: 'center', behavior: 'smooth' });
     el.classList.remove('highlight'); void el.offsetWidth; el.classList.add('highlight');
     setTimeout(() => el.classList.remove('highlight'), 2500);
   }
@@ -172,13 +172,52 @@ function sortedUsers() {
   });
 }
 
+// The table only renders the rows that are scrolled into view (plus a buffer), so thousands of
+// viewers cost the same as a screenful. Rows have a fixed height, measured from the first render.
+const table = { rows: [], rowH: 37, buffer: 12, lastStart: -1, lastEnd: -1, raf: null };
+const rowHtml = u => `<tr data-user="${esc(u.username)}" class="${u.present ? '' : 'gone'} ${u.username === state.detailUser ? 'selected' : ''}">${COLUMNS.map(c => `<td class="${c.cls ?? ''} ${c.num ? 'num' : ''}">${c.render(u)}</td>`).join('')}</tr>`;
+
 function renderTable() {
   const thead = $('#users-table thead');
   thead.innerHTML = `<tr>${COLUMNS.map(c => `<th data-key="${c.key}" class="${c.num ? 'num' : ''} ${state.sort.key === c.key ? 'sorted' : ''}"><span class="th-label">${c.label}${state.sort.key === c.key ? (state.sort.dir > 0 ? ' ▲' : ' ▼') : ''}</span><span class="col-resize" data-resize="${c.key}" title="Drag to resize, double-click to reset"></span></th>`).join('')}</tr>`;
   applyColWidths();
-  const rows = sortedUsers();
-  $('#users-table tbody').innerHTML = rows.map(u => `<tr data-user="${esc(u.username)}" class="${u.present ? '' : 'gone'} ${u.username === state.detailUser ? 'selected' : ''}">${COLUMNS.map(c => `<td class="${c.cls ?? ''} ${c.num ? 'num' : ''}">${c.render(u)}</td>`).join('')}</tr>`).join('')
-    || `<tr><td colspan="${COLUMNS.length}" class="note">${!state.snap ? 'loading…' : state.snap.users.length ? 'nobody matches' : state.snap.state === 'live' ? 'connected, waiting for viewers…' : 'no viewers seen yet today'}</td></tr>`;
+  table.rows = sortedUsers();
+  table.lastStart = -1; // force a redraw of the window
+  renderTableWindow();
+}
+
+function renderTableWindow(force = true) {
+  const wrap = $('#tab-users .table-wrap'), tbody = $('#users-table tbody');
+  const rows = table.rows;
+  if (!rows.length) {
+    tbody.innerHTML = `<tr><td colspan="${COLUMNS.length}" class="note">${!state.snap ? 'loading…' : state.snap.users.length ? 'nobody matches' : state.snap.state === 'live' ? 'connected, waiting for viewers…' : 'no viewers seen yet today'}</td></tr>`;
+    table.lastStart = -1; return;
+  }
+  const headH = $('#users-table thead').offsetHeight || 33;
+  const start = Math.max(0, Math.floor((wrap.scrollTop - headH) / table.rowH) - table.buffer);
+  const end = Math.min(rows.length, Math.ceil((wrap.scrollTop - headH + wrap.clientHeight) / table.rowH) + table.buffer);
+  if (!force && start === table.lastStart && end === table.lastEnd) return;
+  table.lastStart = start; table.lastEnd = end;
+  const spacer = h => h > 0 ? `<tr class="spacer" style="height:${h}px"><td colspan="${COLUMNS.length}"></td></tr>` : '';
+  tbody.innerHTML = spacer(start * table.rowH) + rows.slice(start, end).map(rowHtml).join('') + spacer((rows.length - end) * table.rowH);
+  const first = tbody.querySelector('tr[data-user]');
+  if (first) { const h = first.getBoundingClientRect().height; if (h > 10 && Math.abs(h - table.rowH) > 0.5) { table.rowH = h; table.lastStart = -1; renderTableWindow(); } }
+}
+
+$('#tab-users .table-wrap').addEventListener('scroll', () => {
+  if (table.raf) return;
+  table.raf = requestAnimationFrame(() => { table.raf = null; renderTableWindow(false); });
+});
+window.addEventListener('resize', () => { table.lastStart = -1; if (state.tab === 'users') renderTableWindow(); });
+
+/** Scroll the users table so `username` is centred, rendering that window. Returns the row element. */
+function scrollTableTo(username) {
+  const i = table.rows.findIndex(u => u.username === username);
+  if (i < 0) return null;
+  const wrap = $('#tab-users .table-wrap');
+  wrap.scrollTop = Math.max(0, i * table.rowH - wrap.clientHeight / 2 + table.rowH);
+  renderTableWindow();
+  return $(`#users-table tbody tr[data-user="${CSS.escape(username)}"]`);
 }
 
 // Tag filters for the suspects list: label, and the test a row must pass.
