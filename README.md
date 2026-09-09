@@ -23,8 +23,9 @@ npm test
   waiting for them to go live, purple = connecting) and present/seen counts. Add a room with the
   box below the list. Rooms added here are remembered in `config.json`.
 - **Blacklist** and **Watch list** (sidebar): one pair per room, edited in place, saved immediately.
-- **Users** tab: everyone seen today. Click a column to sort, type to search, tick "present only".
-  Click a row for the detail drawer.
+- **Users** tab: everyone seen today. Click a column to sort, drag a header edge to resize it
+  (double-click the edge to reset; widths are remembered), type to search, tick "present only".
+  Long names are cut with an ellipsis; hover to see the full name. Click a row for the drawer.
 - **Suspects** tab: today's users ranked by burner score with the reasons spelled out. Tag chips
   filter the list (flagged, blacklist hits, in another room now, renamed, no followers, watched,
   pinned…). **Pin** an account to keep it on the list; **Dismiss** hides one until it joins again;

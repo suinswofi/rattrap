@@ -82,22 +82,50 @@ function renderHeader() {
 }
 
 // ---------- users table ----------
+// `width` is the default column width in px; the user can drag header edges to change it.
 const COLUMNS = [
-  { key: 'username', label: 'User', render: u => `${esc(u.username)}${u.nickname && u.nickname !== u.username ? `<span class="nick">${esc(u.nickname)}</span>` : ''}`, cls: 'user' },
-  { key: 'present', label: 'Here', render: u => `<span class="here ${u.present ? 'yes' : ''}" title="${u.present ? 'believed present' : 'gone'}"></span>` },
-  { key: 'score', label: 'Score', num: true, render: u => `<span class="score ${scoreClass(u.score)}" title="${esc(u.reasons.join('; ') || 'nothing suspicious')}">${u.score}</span>` },
-  { key: 'joins', label: 'Joins', num: true, render: u => u.joins },
-  { key: 'chats', label: 'Chats', num: true, render: u => u.chats },
-  { key: 'likes', label: 'Likes', num: true, render: u => u.likes },
-  { key: 'coins', label: 'Coins', num: true, render: u => u.coins },
-  { key: 'firstSeen', label: 'First', render: u => fmtTime(u.firstSeen) },
-  { key: 'lastSeen', label: 'Last', render: u => fmtTime(u.lastSeen) },
-  { key: 'timeInRoom', label: 'In room', num: true, render: u => dur(u.timeInRoom) },
-  { key: 'daysSeen', label: 'Days', num: true, render: u => u.daysSeen },
-  { key: 'firstSeenEver', label: 'First ever', render: u => fmtDate(u.firstSeenEver) },
-  { key: 'followers', label: 'Flw / ing', num: true, render: u => u.followers == null ? '–' : `${num(u.followers)} / ${num(u.following)}` },
-  { key: 'flags', label: 'Flags', render: u => u.flags.map(f => `<span class="flag ${flagClass(f)}">${esc(f)}</span>`).join('') },
+  { key: 'username', label: 'User', width: 260, render: u => `<span title="${esc(u.username)}${u.nickname && u.nickname !== u.username ? ` (${esc(u.nickname)})` : ''}">${esc(u.username)}${u.nickname && u.nickname !== u.username ? `<span class="nick">${esc(u.nickname)}</span>` : ''}</span>`, cls: 'user' },
+  { key: 'present', label: 'Here', width: 62, render: u => `<span class="here ${u.present ? 'yes' : ''}" title="${u.present ? 'believed present' : 'gone'}"></span>` },
+  { key: 'score', label: 'Score', width: 72, num: true, render: u => `<span class="score ${scoreClass(u.score)}" title="${esc(u.reasons.join('; ') || 'nothing suspicious')}">${u.score}</span>` },
+  { key: 'joins', label: 'Joins', width: 68, num: true, render: u => u.joins },
+  { key: 'chats', label: 'Chats', width: 70, num: true, render: u => u.chats },
+  { key: 'likes', label: 'Likes', width: 70, num: true, render: u => u.likes },
+  { key: 'coins', label: 'Coins', width: 72, num: true, render: u => u.coins },
+  { key: 'firstSeen', label: 'First', width: 84, render: u => fmtTime(u.firstSeen) },
+  { key: 'lastSeen', label: 'Last', width: 84, render: u => fmtTime(u.lastSeen) },
+  { key: 'timeInRoom', label: 'In room', width: 86, num: true, render: u => dur(u.timeInRoom) },
+  { key: 'daysSeen', label: 'Days', width: 62, num: true, render: u => u.daysSeen },
+  { key: 'firstSeenEver', label: 'First ever', width: 100, render: u => fmtDate(u.firstSeenEver) },
+  { key: 'followers', label: 'Flw / ing', width: 110, num: true, render: u => u.followers == null ? '–' : `${num(u.followers)} / ${num(u.following)}` },
+  { key: 'flags', label: 'Flags', width: 200, render: u => u.flags.map(f => `<span class="flag ${flagClass(f)}">${esc(f)}</span>`).join('') },
 ];
+
+// ---------- column widths (drag the header edge; double-click resets; remembered per machine) ----------
+const MIN_COL = 40;
+const colWidths = (() => { try { return JSON.parse(localStorage.getItem('bouncer.colWidths') || '{}'); } catch { return {}; } })();
+const colWidth = c => Math.max(MIN_COL, Number(colWidths[c.key]) || c.width);
+const saveColWidths = () => { try { localStorage.setItem('bouncer.colWidths', JSON.stringify(colWidths)); } catch { /* private mode etc. */ } };
+
+function applyColWidths() {
+  const table = $('#users-table');
+  let cg = table.querySelector('colgroup');
+  if (!cg) { cg = document.createElement('colgroup'); cg.innerHTML = COLUMNS.map(() => '<col>').join(''); table.prepend(cg); }
+  const cols = cg.children;
+  let total = 0;
+  COLUMNS.forEach((c, i) => { const w = colWidth(c); cols[i].style.width = `${w}px`; total += w; });
+  table.style.width = `${total}px`;
+}
+
+function startColResize(e, key) {
+  e.preventDefault(); e.stopPropagation();
+  const col = COLUMNS.find(c => c.key === key);
+  const startX = e.clientX, startW = colWidth(col);
+  document.body.classList.add('resizing');
+  const move = ev => { colWidths[key] = Math.max(MIN_COL, startW + ev.clientX - startX); applyColWidths(); };
+  const up = () => { document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); document.body.classList.remove('resizing'); saveColWidths(); };
+  document.addEventListener('mousemove', move);
+  document.addEventListener('mouseup', up);
+}
 
 function sortedUsers() {
   const q = state.search.trim().toLowerCase();
@@ -115,7 +143,8 @@ function sortedUsers() {
 
 function renderTable() {
   const thead = $('#users-table thead');
-  thead.innerHTML = `<tr>${COLUMNS.map(c => `<th data-key="${c.key}" class="${c.num ? 'num' : ''} ${state.sort.key === c.key ? 'sorted' : ''}">${c.label}${state.sort.key === c.key ? (state.sort.dir > 0 ? ' ▲' : ' ▼') : ''}</th>`).join('')}</tr>`;
+  thead.innerHTML = `<tr>${COLUMNS.map(c => `<th data-key="${c.key}" class="${c.num ? 'num' : ''} ${state.sort.key === c.key ? 'sorted' : ''}"><span class="th-label">${c.label}${state.sort.key === c.key ? (state.sort.dir > 0 ? ' ▲' : ' ▼') : ''}</span><span class="col-resize" data-resize="${c.key}" title="Drag to resize, double-click to reset"></span></th>`).join('')}</tr>`;
+  applyColWidths();
   const rows = sortedUsers();
   $('#users-table tbody').innerHTML = rows.map(u => `<tr data-user="${esc(u.username)}" class="${u.present ? '' : 'gone'} ${u.username === state.detailUser ? 'selected' : ''}">${COLUMNS.map(c => `<td class="${c.cls ?? ''} ${c.num ? 'num' : ''}">${c.render(u)}</td>`).join('')}</tr>`).join('')
     || `<tr><td colspan="${COLUMNS.length}" class="note">${!state.snap ? 'loading…' : state.snap.users.length ? 'nobody matches' : state.snap.state === 'live' ? 'connected, waiting for viewers…' : 'no viewers seen yet today'}</td></tr>`;
@@ -412,7 +441,10 @@ document.addEventListener('click', async e => {
   const row = e.target.closest('[data-user]');
   if (row && !e.target.closest('.side-list') && !e.target.closest('button[data-action]')) openDetail(row.dataset.user);
 });
+$('#users-table thead').addEventListener('mousedown', e => { const h = e.target.closest('.col-resize'); if (h && e.button === 0) startColResize(e, h.dataset.resize); });
+$('#users-table thead').addEventListener('dblclick', e => { const h = e.target.closest('.col-resize'); if (!h) return; e.stopPropagation(); delete colWidths[h.dataset.resize]; saveColWidths(); applyColWidths(); });
 $('#users-table thead').addEventListener('click', e => {
+  if (e.target.closest('.col-resize')) return;
   const th = e.target.closest('th[data-key]'); if (!th) return;
   const key = th.dataset.key;
   state.sort = state.sort.key === key ? { key, dir: -state.sort.dir } : { key, dir: ['username', 'firstSeen', 'lastSeen', 'firstSeenEver'].includes(key) ? 1 : -1 };

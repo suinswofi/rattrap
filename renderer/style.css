@@ -115,20 +115,28 @@ input:focus { border-color: var(--purple); box-shadow: 0 0 0 2px var(--purple-di
 #content { flex: 1; min-height: 0; position: relative; }
 .tab { position: absolute; inset: 0; display: flex; flex-direction: column; min-height: 0; }
 .table-wrap { flex: 1; overflow: auto; }
-table { border-collapse: collapse; width: 100%; white-space: nowrap; }
+table { border-collapse: collapse; table-layout: fixed; min-width: 100%; white-space: nowrap; }
 thead th {
   position: sticky; top: 0; z-index: 1; background: var(--elevated); color: var(--muted); font-weight: 600; font-size: 11px;
-  text-transform: uppercase; letter-spacing: .5px; text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); cursor: pointer;
+  text-transform: uppercase; letter-spacing: .4px; text-align: left; padding: 8px 8px; border-bottom: 1px solid var(--border); cursor: pointer;
 }
+thead th { position: sticky; overflow: hidden; }
+thead th .th-label { display: block; overflow: hidden; text-overflow: ellipsis; }
 thead th:hover { color: var(--text); }
+.col-resize { position: absolute; top: 0; right: -4px; width: 9px; height: 100%; cursor: col-resize; z-index: 2; }
+.col-resize::after { content: ''; position: absolute; left: 4px; top: 6px; bottom: 6px; width: 1px; background: var(--border-strong); }
+.col-resize:hover::after, body.resizing .col-resize::after { background: var(--purple); width: 2px; }
+body.resizing { cursor: col-resize; user-select: none; }
+body.resizing tbody tr:hover td { background: inherit; }
 thead th.sorted { color: var(--purple-light); }
 thead th.num, td.num { text-align: right; font-variant-numeric: tabular-nums; }
-tbody td { padding: 6px 10px; border-bottom: 1px solid var(--border); color: var(--muted); }
+tbody td { padding: 6px 10px; border-bottom: 1px solid var(--border); color: var(--muted); overflow: hidden; text-overflow: ellipsis; }
 tbody tr { cursor: pointer; }
 tbody tr:hover td { background: var(--hover); }
 tbody tr.selected td { background: var(--purple-dim); }
 tbody tr.gone td { color: var(--dim); }
 td.user { color: var(--text); font-weight: 500; }
+td.user > span { display: block; overflow: hidden; text-overflow: ellipsis; }
 td.user .nick { color: var(--dim); font-weight: 400; margin-left: 6px; }
 td .flag { display: inline-block; font-size: 10px; font-weight: 700; padding: 1px 5px; border-radius: 3px; background: var(--border); color: var(--muted); margin-right: 3px; text-transform: uppercase; letter-spacing: .3px; }
 .flag.bl { background: var(--live); color: #fff; }
