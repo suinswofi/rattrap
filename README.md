@@ -8,6 +8,13 @@ to file bogus abuse reports.
 
 TikTok Rat Trap is an Electron desktop app with a Twitch-style dark interface.
 
+![The Users tab with a viewer's detail drawer open](docs/screenshot-users.png)
+
+![The Suspects tab with tag filters, pins and dismissals](docs/screenshot-suspects.png)
+
+*Screenshots use demo mode (`RATTRAP_DEMO=1 npm start`), which plays back invented activity
+with made-up names so no real viewers are shown.*
+
 ```sh
 npm install
 npm start                        # opens the rooms saved in config.json
@@ -114,6 +121,13 @@ The score ranks who deserves a second look. It proves nothing on its own: a shy 
 fresh account looks the same as a burner until they do something. In busy rooms TikTok samples
 join and like events, so many honest viewers appear once and never again, which alone earns a
 couple of points. Rely on the profile-based reasons and the blacklist, not on the lurker signals.
+
+## Demo mode
+
+`RATTRAP_DEMO=1 npm start` runs the app against two fictional rooms with generated joins, chat,
+likes and gifts, one of which is on the other's blacklist, so every feature has something to
+show. It uses a throwaway data folder and never touches `config.json`. Useful for trying the
+interface without a live stream, and for screenshots.
 
 ## Building installers
 

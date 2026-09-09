@@ -5,7 +5,13 @@ import { app, BrowserWindow, ipcMain, shell, dialog } from 'electron';
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { tmpdir } from 'node:os';
 import { Monitor, readConfigFile, normalizeConfig, configToJSON, normalizeUsername, nameSet, roomLists } from './monitor.js';
+import { createDemoConnection, DEMO_ROOMS } from './demo.js';
+
+// RATTRAP_DEMO=1 runs against invented activity instead of TikTok, with throwaway data, and never
+// touches config.json. Handy for UI work and screenshots.
+const DEMO = process.env.RATTRAP_DEMO === '1';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 // Running from the repo: config.json and data/ live next to the code. Packaged (AppImage, installer):
@@ -15,7 +21,7 @@ const CONFIG_FILE = join(APP_DIR, 'config.json');
 
 let fileCfg, cfg;
 try {
-  fileCfg = readConfigFile(CONFIG_FILE);
+  fileCfg = DEMO ? { ...readConfigFile(''), dataDir: join(tmpdir(), 'rattrap-demo'), rooms: DEMO_ROOMS, lists: { [DEMO_ROOMS[0]]: { blacklist: [DEMO_ROOMS[1]], watch: ['captain_quokka'] } } } : readConfigFile(CONFIG_FILE);
   cfg = normalizeConfig({ ...fileCfg }, APP_DIR);
 } catch (e) {
   app.whenReady().then(() => { dialog.showErrorBox('TikTok Rat Trap', `Could not read ${CONFIG_FILE}:\n${e.message}`); app.quit(); });
@@ -28,6 +34,7 @@ let win = null;
 const send = payload => { if (win && !win.isDestroyed()) win.webContents.send('rattrap:event', payload); };
 
 function saveConfig() {
+  if (DEMO) return;
   const out = { ...configToJSON(cfg), dataDir: fileCfg.dataDir, rooms: [...persistedRooms].filter(r => monitors.has(r)) };
   try { mkdirSync(APP_DIR, { recursive: true }); writeFileSync(CONFIG_FILE, JSON.stringify(out, null, 2)); }
   catch (e) { send({ type: 'log', room: null, entry: { t: Date.now(), kind: 'error', text: `could not save config: ${e.message}`, alert: true } }); }
@@ -43,7 +50,7 @@ function addRoom(name) {
   const room = normalizeUsername(name);
   if (!room) throw new Error('empty username');
   if (monitors.has(room)) return roomSummary(monitors.get(room));
-  const m = new Monitor(room, cfg, { peers: () => monitors.values() });
+  const m = new Monitor(room, cfg, { peers: () => monitors.values(), ...(DEMO ? { createConnection: createDemoConnection } : {}) });
   monitors.set(room, m);
   m.on('join', ({ user }) => { for (const other of monitors.values()) if (other !== m) other.peerJoined(room, user); });
   m.on('log', entry => send({ type: 'log', room, entry }));
