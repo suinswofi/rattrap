@@ -574,12 +574,15 @@ export function who(d) {
   const username = u.displayId || u.uniqueId; if (!username) return null;
   const fi = u.followInfo ?? {};
   // createTime and bioDescription exist in the schema but TikTok never fills them in LIVE events.
+  // The same goes for `secret` (private account) and `verified`: in a 172-user sample (Sept 2026) neither was
+  // ever set. The proto decoder returns 0/false for fields that were never sent, so a falsy value carries no
+  // information at all. Only a positive value is reported; anything else stays unknown rather than "no".
   return { username, info: {
     nickname: u.nickname, userId: u.id, isAdmin: !!u.userAttr?.isAdmin,
     isFollower: fi.followStatus !== undefined && fi.followStatus !== null && fi.followStatus !== '' ? Number(fi.followStatus) > 0 : undefined,
     followers: num(fi.followerCount), following: num(fi.followingCount),
-    verified: typeof u.verified === 'boolean' ? u.verified : undefined,
-    privateAccount: u.secret !== undefined && u.secret !== null ? Number(u.secret) > 0 : undefined,
+    verified: u.verified === true ? true : undefined,
+    privateAccount: Number(u.secret) > 0 ? true : undefined,
     gifterLevel: num(u.payGrade?.level),
     secUid: u.secUid || undefined,
   } };

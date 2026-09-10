@@ -29,7 +29,10 @@ test('who() maps the v2 user shape', () => {
   assert.equal(w.info.followers, 12);
   assert.equal(w.info.following, 3);
   assert.equal(w.info.isFollower, true);
-  assert.equal(w.info.privateAccount, false);
+  assert.equal(w.info.privateAccount, undefined, 'secret 0 is indistinguishable from "not sent", so it stays unknown');
+  assert.equal(w.info.verified, undefined);
+  assert.equal(who(user('bob', { secret: 1 })).info.privateAccount, true);
+  assert.equal(who({ user: { displayId: 'carol', verified: true } }).info.verified, true);
   assert.equal(who({}), null);
 });
 

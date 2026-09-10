@@ -33,9 +33,10 @@ npm test
   Long names are cut with an ellipsis; hover to see the full name. Click a row for the drawer.
 - **Suspects** tab: today's users ranked by burner score with the reasons spelled out. Tag chips
   filter the list (flagged, blacklist hits, in another room now, renamed, no followers, watched,
-  pinned…). **Pin** an account to keep it on the list; **Dismiss** hides one until it joins again;
-  **Clear list** dismisses everything shown except pinned accounts. Dismissals last for the day,
-  pins are remembered per room.
+  pinned…); selecting several keeps only accounts that have every one of them. **Pin** an account
+  to keep it on the list; **Dismiss** hides one until it joins again; **Dismiss all but pinned**
+  dismisses every suspect except pinned ones, including any hidden by filters. Dismissals last
+  for the day, pins are remembered per room.
 - **Chat** and **Log** tabs: live chat and the join/leave/gift/flag event log.
 - **Detail drawer**: today's activity, TikTok-reported profile (followers, following, verified,
   private, gifter level), the room history (first seen ever, days seen, totals, previous
@@ -105,7 +106,7 @@ Weights live at the top of `burner.js`:
 | 0 followers and 0 following | 1 |
 | auto-generated username (`user8237461920`) | 2 |
 | nickname never changed from the username | 1 |
-| private account | 1 |
+| private account (TikTok does not currently send this in LIVE events, so it rarely if ever fires) | 1 |
 | first day ever seen in this room | 1 |
 | joined but never chatted, liked, gifted or shared | 1 |
 | under 2 minutes in the room | 1 |

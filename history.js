@@ -12,6 +12,8 @@ import { join as pathJoin, dirname, basename } from 'node:path';
 
 const DAY_FIELDS = ['joins', 'chats', 'likes', 'gifts', 'coins', 'shares', 'presentMs'];
 const PROFILE_FIELDS = ['followers', 'following', 'verified', 'privateAccount', 'gifterLevel', 'secUid'];
+// A stored `false` for these two only ever meant "TikTok did not send it"; report it as unknown.
+const cleanProfile = p => { const out = { ...(p ?? {}) }; for (const f of ['privateAccount', 'verified']) if (out[f] === false) delete out[f]; return out; };
 
 export const historyFile = (dataDir, room) => pathJoin(dataDir, `history-${room}.json`);
 
@@ -59,6 +61,9 @@ export class RoomHistory {
         rec.nickname = u.nickname;
       }
       for (const f of PROFILE_FIELDS) if (u[f] !== null && u[f] !== undefined) rec.profile[f] = u[f];
+      // Older versions recorded privateAccount/verified as false whenever TikTok simply left the field out.
+      // Those values mean "unknown", not "no", so drop them (see who() in monitor.js).
+      for (const f of ['privateAccount', 'verified']) if (rec.profile[f] === false) delete rec.profile[f];
       if (typeof u.isFollower === 'boolean') rec.isFollower = u.isFollower;
       if (u.followed) rec.isFollower = true;
       if (u.isAdmin) rec.isAdmin = true;
@@ -95,7 +100,7 @@ export class RoomHistory {
     return {
       firstSeenEver: firstSeen(rec), lastSeenEver: lastSeen(rec),
       daysSeen: dates.length, dates, totals,
-      aliases: rec.aliases ?? [], nicknames: rec.nicknames ?? [], profile: rec.profile ?? {},
+      aliases: rec.aliases ?? [], nicknames: rec.nicknames ?? [], profile: cleanProfile(rec.profile),
       isFollower: rec.isFollower ?? null,
     };
   }

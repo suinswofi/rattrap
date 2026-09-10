@@ -137,6 +137,8 @@ export class ViewerTracker {
       const existing = this.users.get(id);
       const rec = { ...this._blank(id, r.firstSeen ?? Date.now()), ...(existing ?? {}), ...r, username: id, present: false, sessionStart: null, presentMs: r.presentMs ?? existing?.presentMs ?? 0, chatLog: r.chatLog ?? existing?.chatLog ?? [] };
       delete rec.uniqueId;
+      // Snapshots from older versions hold `false` here when TikTok simply left the field out; that is unknown, not "no".
+      for (const f of ['privateAccount', 'verified']) if (rec[f] === false) rec[f] = null;
       if (existing) {
         rec.firstSeen = Math.min(existing.firstSeen, r.firstSeen ?? existing.firstSeen);
         rec.lastSeen = Math.max(existing.lastSeen, r.lastSeen ?? 0);

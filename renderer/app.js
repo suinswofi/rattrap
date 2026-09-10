@@ -254,19 +254,22 @@ function suspectRows() {
   const q = state.search.trim().toLowerCase();
   const all = (state.snap?.users ?? []).filter(u => (u.score > 0 || u.pinned) && (!q || u.username.toLowerCase().includes(q) || (u.nickname ?? '').toLowerCase().includes(q)));
   const visible = all.filter(u => state.showDismissed || u.dismissedAt == null);
+  // Selected tags combine with AND: every selected tag must match, so each extra tag narrows the list.
   const active = SUSPECT_TAGS.filter(t => state.suspectFilters.has(t.key));
-  const list = (active.length ? visible.filter(u => active.some(t => t.test(u))) : visible)
+  const list = (active.length ? visible.filter(u => active.every(t => t.test(u))) : visible)
     .sort((a, b) => (b.pinned - a.pinned) || ((a.dismissedAt != null) - (b.dismissedAt != null)) || (b.score - a.score));
   return { all, visible, list, dismissed: all.filter(u => u.dismissedAt != null).length };
 }
 
 function renderSuspects() {
-  const { visible, list, dismissed } = suspectRows();
-  $('#suspect-filters').innerHTML = SUSPECT_TAGS.map(t => { const n = visible.filter(t.test).length; return n || state.suspectFilters.has(t.key)
+  const { all, visible, list, dismissed } = suspectRows();
+  // Chip counts are taken from the already-narrowed list, so each number says how many rows would remain
+  // if that tag were added. Tags nothing on the list has are hidden unless they are selected.
+  $('#suspect-filters').innerHTML = SUSPECT_TAGS.map(t => { const n = list.filter(t.test).length; return n || state.suspectFilters.has(t.key)
     ? `<button class="chip ${state.suspectFilters.has(t.key) ? 'on' : ''}" data-filter="${t.key}">${t.label}<span class="n">${n}</span></button>` : ''; }).join('')
     + (state.suspectFilters.size ? '<button class="chip" data-filter="">clear filters</button>' : '');
   $('#dismissed-count').textContent = dismissed ? `(${dismissed})` : '';
-  $('#btn-clear-suspects').disabled = !list.some(u => !u.pinned && u.dismissedAt == null);
+  $('#btn-dismiss-all').disabled = !all.some(u => !u.pinned && u.dismissedAt == null);
   $('#suspects-list').innerHTML = list.slice(0, 300).map(u => `
     <div class="card ${u.pinned ? 'pinned' : ''} ${u.dismissedAt != null ? 'dismissed' : ''}" data-user="${esc(u.username)}">
       <span class="score ${scoreClass(u.score)}">${u.score}</span>
@@ -277,7 +280,7 @@ function renderSuspects() {
         ${u.dismissedAt != null ? '<button data-action="restore" title="Put this account back on the list">Restore</button>' : `<button data-action="dismiss" title="Hide this account until it joins again" ${u.pinned ? 'disabled' : ''}>Dismiss</button>`}
       </div>
       <div class="reasons">${u.reasons.map(r => `<span class="reason ${reasonClass(r)}">${esc(r)}</span>`).join('') || '<span class="reason">nothing suspicious</span>'}</div>
-    </div>`).join('') || `<p class="note">${visible.length ? 'Nothing matches the selected tags.' : dismissed ? 'Everything is dismissed. Tick "show dismissed" to see them.' : 'Nobody scored above 0.'}</p>`;
+    </div>`).join('') || `<p class="note">${visible.length ? 'Nothing matches every selected tag.' : dismissed ? 'Everything is dismissed. Tick "show dismissed" to see them.' : 'Nobody scored above 0.'}</p>`;
 }
 
 $('#suspect-filters').addEventListener('click', e => {
@@ -287,12 +290,15 @@ $('#suspect-filters').addEventListener('click', e => {
   renderSuspects();
 });
 $('#show-dismissed').addEventListener('change', e => { state.showDismissed = e.target.checked; renderSuspects(); });
-$('#btn-clear-suspects').addEventListener('click', async () => {
-  const { list } = suspectRows();
-  const names = list.filter(u => !u.pinned && u.dismissedAt == null).map(u => u.username);
+// Dismisses every suspect that is not pinned, including ones hidden by the search box or tag filters.
+$('#btn-dismiss-all').addEventListener('click', async () => {
+  const q = state.search.trim().toLowerCase();
+  const everyone = (state.snap?.users ?? []).filter(u => u.score > 0 || u.pinned);
+  const names = everyone.filter(u => !u.pinned && u.dismissedAt == null).map(u => u.username);
   if (!names.length) return;
-  const pinnedCount = list.filter(u => u.pinned).length;
-  if (!confirm(`Dismiss ${names.length} account${names.length === 1 ? '' : 's'} from the list?${pinnedCount ? ` ${pinnedCount} pinned account${pinnedCount === 1 ? '' : 's'} will stay.` : ''} They come back if they join again.`)) return;
+  const pinnedCount = everyone.filter(u => u.pinned).length;
+  const hidden = q || state.suspectFilters.size ? ' This includes accounts hidden by the search box or tag filters.' : '';
+  if (!confirm(`Dismiss all ${names.length} suspect${names.length === 1 ? '' : 's'}?${pinnedCount ? ` ${pinnedCount} pinned account${pinnedCount === 1 ? '' : 's'} will stay.` : ''}${hidden} Dismissed accounts come back if they join again.`)) return;
   await api.dismiss(state.current, names);
   await refreshSnapshot();
 });
@@ -492,7 +498,7 @@ const HELP = {
 <p>Add someone by typing their username below, or with the <b>Watch</b> button in a viewer's detail drawer.</p>
 <div class="example"><b>Typical flow.</b> The blacklist or the Suspects tab surfaces an account that looks like a burner. Put it on the watch list, and from then on every move it makes in this room is announced.</div>
 <p>Cross-room alerts do not need the watch list: anyone who overlaps with a blacklisted streamer is flagged, watched or not.</p>
-<p><b>Pinning</b> (Suspects tab) is different again: a pinned account simply stays on the Suspects list when you clear it, and always shows there even with a score of 0. Pin what you want to keep looking at; watch what you want to be told about.</p>`,
+<p><b>Pinning</b> (Suspects tab) is different again: a pinned account simply stays on the Suspects list when you press <b>Dismiss all</b>, and always shows there even with a score of 0. Pin what you want to keep looking at; watch what you want to be told about.</p>`,
   },
 };
 function openHelp(key) {
