@@ -1,18 +1,14 @@
-// Tracks viewer presence and activity from TikTok LIVE events.
+// Tracks the viewers seen in the current stream and what they did.
 //
-// TikTok sends no "user left" event, so a leave is inferred either when the user
-// re-joins (they must have left in between) or after `timeoutMs` with no activity.
-// The recorded leave time is the last moment we saw the user, so it is never later than reality.
+// TikTok sends no "user left" event, so nobody is ever marked as gone: an account is simply
+// "seen this stream" from its first event onwards. A repeated join means they left and came back.
 
 export class ViewerTracker {
   /**
    * @param {object} [opts]
-   * @param {number} [opts.timeoutMs]     inactivity after which a present user is assumed gone
    * @param {number} [opts.chatHistory]   how many recent chat messages to keep per user
    */
   constructor(opts = {}) {
-    if (typeof opts === 'number') opts = { timeoutMs: opts };
-    this.timeoutMs = opts.timeoutMs ?? 15 * 60 * 1000;
     this.chatHistory = opts.chatHistory ?? 50;
     this.users = new Map(); // username (displayId) -> record
   }
@@ -22,13 +18,11 @@ export class ViewerTracker {
     return {
         username, nickname: null, userId: null,
         firstSeen: now, lastSeen: now,
-        firstLeft: null, lastLeft: null,
-        joins: 0, present: false,
-        leftHow: null, // 'rejoin' | 'timeout'
+        joins: 0, lastJoin: null,
         chats: 0, likes: 0, gifts: 0, coins: 0, shares: 0, followed: false,
         isAdmin: false, isFollower: null,
-        presentMs: 0, sessionStart: null, // time spent in the room (completed visits) and start of the current visit
-        dismissedAt: null, // hidden from the suspects list since this time; a later join clears it
+        hops: [], // moves between this room and a blacklisted streamer's stream: { t, dir: 'from' | 'to', room, gapMs }
+        dismissedAt: null, // hidden from the suspect lists since this time; a later join clears it
         // profile fields TikTok attaches to events (null = never delivered)
         secUid: null, followers: null, following: null,
         verified: null, privateAccount: null, gifterLevel: null,
@@ -49,36 +43,19 @@ export class ViewerTracker {
     return u;
   }
 
-  _markLeft(u, when, how) {
-    u.present = false;
-    u.leftHow = how;
-    if (u.sessionStart !== null) { u.presentMs += Math.max(0, when - u.sessionStart); u.sessionStart = null; }
-    if (u.firstLeft === null) u.firstLeft = when;
-    u.lastLeft = when;
-  }
-
-  _touch(u, now) {
-    if (!u.present) u.sessionStart = now;
-    u.present = true;
-    if (now > u.lastSeen) u.lastSeen = now;
-  }
-
-  /** Total time a user has spent in the room today, including the current visit. */
-  timeInRoom(u, now = Date.now()) {
-    return u.presentMs + (u.present && u.sessionStart !== null ? Math.max(0, now - u.sessionStart) : 0);
-  }
+  _touch(u, now) { if (now > u.lastSeen) u.lastSeen = now; }
 
   /** WebcastMemberMessage: user entered the room. */
   join(username, info, now = Date.now()) {
     const u = this._get(username, info, now);
-    if (u.present) this._markLeft(u, u.lastSeen, 'rejoin'); // must have left before re-joining
     if (u.dismissedAt !== null && now >= u.dismissedAt) u.dismissedAt = null; // back in the room: worth a fresh look
     u.joins++;
+    u.lastJoin = now;
     this._touch(u, now);
     return u;
   }
 
-  /** Any activity proves the user is still here. `kind` updates the matching counter. */
+  /** Any activity proves the user is here. `kind` updates the matching counter. */
   activity(username, info, kind = null, extra = {}, now = Date.now()) {
     const u = this._get(username, info, now);
     this._touch(u, now);
@@ -98,25 +75,21 @@ export class ViewerTracker {
     return u;
   }
 
-  /** Call periodically. Marks present users idle for > timeoutMs as left. Returns those users. */
-  sweep(now = Date.now()) {
-    const left = [];
-    for (const u of this.users.values()) {
-      if (u.present && now - u.lastSeen > this.timeoutMs) {
-        this._markLeft(u, u.lastSeen, 'timeout');
-        left.push(u);
-      }
-    }
-    return left;
-  }
-
-  /** Mark everyone as gone (stream ended / we disconnected for long). */
-  clearPresence(now = Date.now()) {
-    for (const u of this.users.values()) if (u.present) this._markLeft(u, Math.min(u.lastSeen, now), 'timeout');
+  /**
+   * Record a move between this room and a blacklisted streamer's stream. Returns the record, or
+   * null when the same move was already recorded less than a minute ago (duplicate events).
+   */
+  hop(username, dir, room, gapMs, now = Date.now()) {
+    const u = this.users.get(username);
+    if (!u) return null;
+    const last = u.hops[u.hops.length - 1];
+    if (last && last.dir === dir && last.room === room && now - last.t < 60_000) return null;
+    u.hops.push({ t: now, dir, room, gapMs: Math.max(0, gapMs) });
+    if (u.hops.length > 50) u.hops.shift();
+    return u;
   }
 
   all() { return [...this.users.values()].sort((a, b) => a.firstSeen - b.firstSeen); }
-  present() { return this.all().filter(u => u.present); }
   get(username) { return this.users.get(String(username ?? '').replace(/^@/, '')); }
   find(q) {
     q = q.toLowerCase();
@@ -127,16 +100,17 @@ export class ViewerTracker {
     return this.all().filter(u => (u[field] ?? 0) > 0).sort((a, b) => b[field] - a[field]).slice(0, n);
   }
 
-  toJSON() { return { timeoutMs: this.timeoutMs, users: this.all() }; }
+  toJSON() { return { users: this.all() }; }
 
-  /** Merge saved records (from toJSON) into this tracker. Nobody is marked present. */
+  /** Merge saved records (from toJSON) into this tracker. */
   load(data) {
     const users = Array.isArray(data) ? data : data?.users ?? [];
     for (const r of users) {
       const id = r.username ?? r.uniqueId; if (!id) continue;
       const existing = this.users.get(id);
-      const rec = { ...this._blank(id, r.firstSeen ?? Date.now()), ...(existing ?? {}), ...r, username: id, present: false, sessionStart: null, presentMs: r.presentMs ?? existing?.presentMs ?? 0, chatLog: r.chatLog ?? existing?.chatLog ?? [] };
-      delete rec.uniqueId;
+      const rec = { ...this._blank(id, r.firstSeen ?? Date.now()), ...(existing ?? {}), ...r, username: id, hops: r.hops ?? existing?.hops ?? [], chatLog: r.chatLog ?? existing?.chatLog ?? [] };
+      // fields from older versions (presence and idle timeouts no longer exist)
+      for (const f of ['uniqueId', 'present', 'firstLeft', 'lastLeft', 'leftHow', 'presentMs', 'sessionStart']) delete rec[f];
       // Snapshots from older versions hold `false` here when TikTok simply left the field out; that is unknown, not "no".
       for (const f of ['privateAccount', 'verified']) if (rec[f] === false) rec[f] = null;
       if (existing) {

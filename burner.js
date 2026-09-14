@@ -5,46 +5,69 @@
 // visible so they can be tuned in one place.
 
 export const WEIGHTS = {
-  inBlacklistedRoomNow: 4, // in a blacklisted streamer's room at this moment (both rooms monitored)
-  followsBlacklisted: 5,   // TikTok reported them as following a blacklisted streamer
-  seenInBlacklistedRoom: 2, // showed up in a blacklisted streamer's room before (follow status unknown / no)
-  renamed: 3,              // same account seen under a different username before
-  noFollowers: 2,          // 0 followers
-  fewFollowers: 1,         // < 10 followers
-  followsNobody: 1,        // 0 following (and 0 followers)
-  defaultUsername: 2,      // TikTok-generated name such as user8237461920
-  defaultNickname: 1,      // nickname never changed from the username
+  // blacklist signals (cross-checks against other monitored rooms)
+  followsBlacklisted: 5,    // TikTok reported them as following a blacklisted streamer
+  inBlacklistedStream: 4,   // seen in a blacklisted streamer's current stream as well (both rooms monitored)
+  seenInBlacklistedRoom: 2, // showed up in a blacklisted streamer's room in an earlier stream
+  // profile signals
+  renamed: 3,               // same account seen under a different username before
+  noFollowers: 2,           // 0 followers
+  fewFollowers: 1,          // < 10 followers
+  followsNobody: 1,         // 0 following (and 0 followers)
+  defaultUsername: 2,       // TikTok-generated name such as user8237461920
+  defaultNickname: 1,       // nickname never changed from the username
   privateAccount: 1,
-  newToRoom: 1,            // first day we have ever seen them here
-  lurker: 1,               // joined, never chatted / liked / gifted / shared
-  driveBy: 1,              // total time in room under 2 minutes
-  repeatDriveBy: 1,        // 3+ joins today but still under 5 minutes in room
+  // behaviour this stream
+  newToRoom: 1,             // never seen in this room in an earlier stream
+  lurker: 1,                // joined, never chatted / liked / gifted / shared
+  repeatJoins: 1,           // joined three or more times this stream (in and out)
 };
+const BLACKLIST_KEYS = new Set(['followsBlacklisted', 'inBlacklistedStream', 'seenInBlacklistedRoom']);
 
 const DEFAULT_NAME = /^user\d{6,}$/i;
+
+/** "45s", "3m", "1h05m" */
+export const shortDur = ms => {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  if (s < 60) return `${s}s`;
+  if (s < 3600) return `${Math.floor(s / 60)}m`;
+  return `${Math.floor(s / 3600)}h${String(Math.floor(s / 60) % 60).padStart(2, '0')}m`;
+};
+
+/** Plain-English description of a hop between this room and a blacklisted streamer's stream. */
+export function hopText(hop) {
+  const gap = shortDur(hop.gapMs);
+  return hop.dir === 'from'
+    ? `came from blacklisted @${hop.room}'s stream (seen there ${gap} earlier)`
+    : `went to blacklisted @${hop.room}'s stream (${gap} after last seen here)`;
+}
 
 /**
  * @param {object} u         tracker record
  * @param {object} [ctx]
  * @param {object} [ctx.history]   RoomHistory summary for this user (from RoomHistory.summarize)
  * @param {Array}  [ctx.rooms]     entries from loadRoomIndex().lookup(u)
- * @param {Array}  [ctx.liveIn]    blacklisted rooms the user is present in right now
+ * @param {Array}  [ctx.liveIn]    blacklisted rooms whose current stream the user has also been seen in
  * @param {Set}    [ctx.blacklist] lowercase streamer usernames
- * @param {number} [ctx.timeInRoom] ms spent in the room today
- * @param {number} [ctx.now]
+ * @param {string} [ctx.sid]       id of the current stream (so it is not counted as an earlier visit)
  *
  * TikTok does not deliver account creation dates or bios in LIVE events (checked against real
- * rooms: always empty), so there are deliberately no account-age or bio signals.
- * @returns {{score:number, reasons:string[], blacklisted:string[]}}
+ * rooms: always empty), so there are deliberately no account-age or bio signals. It sends no
+ * "user left" event either, so there are no signals about how long someone stayed.
+ * @returns {{score:number, blacklistScore:number, reasons:string[], blacklisted:string[]}}
  */
 export function scoreUser(u, ctx = {}) {
   const reasons = [];
-  let score = 0;
-  const hit = (key, text) => { score += WEIGHTS[key]; reasons.push(text); };
+  let score = 0, blacklistScore = 0;
+  const hit = (key, text) => { score += WEIGHTS[key]; if (BLACKLIST_KEYS.has(key)) blacklistScore += WEIGHTS[key]; reasons.push(text); };
 
   const blacklisted = [];
   const liveIn = ctx.liveIn ?? [];
-  for (const room of liveIn) { blacklisted.push(room); hit('inBlacklistedRoomNow', `in blacklisted @${room}'s room right now`); }
+  for (const room of liveIn) {
+    blacklisted.push(room);
+    const hop = [...(u.hops ?? [])].reverse().find(h => h.room === room);
+    hit('inBlacklistedStream', hop ? hopText(hop) : `also in blacklisted @${room}'s current stream`);
+  }
   for (const r of ctx.rooms ?? []) {
     if (!ctx.blacklist?.has(r.room.toLowerCase())) continue;
     if (!blacklisted.includes(r.room)) blacklisted.push(r.room);
@@ -66,12 +89,10 @@ export function scoreUser(u, ctx = {}) {
 
   if (u.privateAccount ?? h?.profile?.privateAccount) hit('privateAccount', 'private account');
 
-  if (!h || h.daysSeen <= 1) hit('newToRoom', 'first day in this room');
+  const earlier = (h?.streams ?? []).filter(s => s.sid !== ctx.sid).length;
+  if (!earlier) hit('newToRoom', 'first time in this room');
   if (u.joins > 0 && !u.chats && !u.likes && !u.gifts && !u.shares) hit('lurker', 'never interacted');
+  if (u.joins >= 3) hit('repeatJoins', `joined ${u.joins} times this stream`);
 
-  const inRoom = ctx.timeInRoom ?? 0;
-  if (u.joins > 0 && !u.present && inRoom < 2 * 60_000) hit('driveBy', 'stayed under 2 minutes');
-  if (u.joins >= 3 && inRoom < 5 * 60_000) hit('repeatDriveBy', `${u.joins} joins, under 5 minutes total`);
-
-  return { score, reasons, blacklisted };
+  return { score, blacklistScore, reasons, blacklisted };
 }

@@ -43,7 +43,7 @@
       </div>
       <div id="room-meta" class="room-meta"></div>
       <div class="room-actions">
-        <button id="btn-save" class="btn primary" title="Write today's snapshot and update the room history">Save</button>
+        <button id="btn-save" class="btn primary" title="Write this stream's snapshot and update the room history">Save</button>
         <button id="btn-reconnect" class="btn">Reconnect</button>
         <button id="btn-remove" class="btn danger">Remove</button>
       </div>
@@ -51,12 +51,12 @@
 
     <nav id="tabs">
       <button class="tab-btn active" data-tab="users">Users <span class="count" id="count-users"></span></button>
-      <button class="tab-btn" data-tab="suspects">Suspects <span class="count" id="count-suspects"></span></button>
+      <button class="tab-btn" data-tab="burners">Burners <span class="count" id="count-burners"></span></button>
+      <button class="tab-btn" data-tab="blacklist">Blacklist hits <span class="count" id="count-blacklist"></span></button>
       <button class="tab-btn" data-tab="chat">Chat</button>
       <button class="tab-btn" data-tab="log">Log</button>
       <div class="tab-tools">
-        <label class="check" id="present-wrap"><input type="checkbox" id="present-only"> present only</label>
-        <label class="check" id="logchat-wrap" hidden><input type="checkbox" id="log-chat"> show chat</label>
+        <label class="stream-pick" id="stream-wrap" hidden title="Which stream to show. Every stream Rat Trap has monitored keeps its own log."><span>Stream</span><select id="stream-select"></select></label>
         <input id="search" type="search" placeholder="search username or nickname" autocomplete="off" spellcheck="false">
       </div>
     </nav>
@@ -66,18 +66,27 @@
         <div class="table-wrap"><table id="users-table"><thead></thead><tbody></tbody></table></div>
       </div>
       <div id="tab-suspects" class="tab" hidden>
-        <p class="note">Points are added for each burner-like signal. The score ranks who deserves a look; it proves nothing on its own. In busy rooms most one-time visitors earn a few points just for being new and quiet, so weigh the profile and blacklist reasons more.</p>
+        <p class="note" id="suspects-note"></p>
         <div id="suspect-tools" class="toolbar">
-          <div id="suspect-filters" class="chipbar" title="Show only accounts that have every selected tag. Each tag you add narrows the list further."></div>
+          <div id="suspect-filters" class="chipbar" title="Click a filter once to keep only accounts that have it, twice to keep only accounts that do not, a third time to switch it off. Filters combine: every selected filter must hold."></div>
           <div class="toolbar-right">
             <label class="check"><input type="checkbox" id="show-dismissed"> show dismissed <span id="dismissed-count" class="count"></span></label>
-            <button id="btn-dismiss-all" class="btn" title="Dismiss every suspect except pinned ones, including any hidden by the search box or tag filters. They come back if they join the room again.">Dismiss all but pinned</button>
+            <button id="btn-dismiss-all" class="btn" title="Dismiss every account on this tab except pinned ones, including any hidden by the search box or filters. They come back if they join the room again.">Dismiss all but pinned</button>
           </div>
         </div>
         <div id="suspects-list" class="cards"></div>
       </div>
       <div id="tab-chat" class="tab" hidden><div id="chat-list" class="stream"></div></div>
-      <div id="tab-log" class="tab" hidden><div id="log-list" class="stream"></div></div>
+      <div id="tab-log" class="tab" hidden>
+        <div id="log-tools" class="toolbar">
+          <div id="log-kinds" class="chipbar" title="Which kinds of event to show"></div>
+          <div class="toolbar-right">
+            <span id="log-count" class="count"></span>
+            <button class="hint" data-help="streams" title="How streams and the log work">?</button>
+          </div>
+        </div>
+        <div id="log-list" class="stream"></div>
+      </div>
       <div id="empty" class="empty" hidden>
         <img class="empty-mark" src="icon.png" alt="">
         <p>Add a streamer in the sidebar to start watching their room.</p>
@@ -101,18 +110,16 @@
   <div class="dialog">
     <h2>Settings</h2>
     <form id="settings-form">
-      <label>Idle timeout (minutes) <input name="idleTimeoutMinutes" type="number" min="1" step="1"></label>
       <label>Alert at burner score <input name="burnerAlertScore" type="number" min="0" step="1"></label>
       <label>Autosave every (minutes, 0 = off) <input name="autosaveMinutes" type="number" min="0" step="1"></label>
       <label>Live check while offline (seconds) <input name="livePollSeconds" type="number" min="30" step="1"></label>
-      <label>Chat messages kept per user <input name="chatHistory" type="number" min="1" step="1"></label>
+      <label>Chat messages kept per user in the stream snapshot (pinned and watched accounts keep everything) <input name="chatHistory" type="number" min="1" step="1"></label>
       <label>Forget accounts not seen for this many days (0 = keep forever; pinned and watched accounts are always kept) <input name="pruneAfterDays" type="number" min="0" step="1"></label>
-      <label>Maximum accounts in today's list (0 = unlimited; over the limit, the oldest that already left are trimmed but stay in history) <input name="maxUsers" type="number" min="0" step="100"></label>
+      <label>Delete stream logs older than this many days (0 = keep forever; pinned and watched accounts' events are kept in the history regardless) <input name="logKeepDays" type="number" min="0" step="1"></label>
+      <label>Maximum accounts in a stream's list (0 = unlimited; over the limit, the ones seen longest ago are trimmed but stay in history) <input name="maxUsers" type="number" min="0" step="100"></label>
       <label>Euler Stream API key (optional) <input name="signApiKey" type="password" autocomplete="off"></label>
       <label class="check"><input name="reconnectWhenLive" type="checkbox"> wait for offline streamers to go live</label>
-      <label class="check"><input name="resume" type="checkbox"> resume today's snapshot on start</label>
-      <label class="check"><input name="chatToFile" type="checkbox"> write chat to a text file (one per room and day, in the data folder)</label>
-      <label class="check"><input name="eventsToFile" type="checkbox"> write the event log to a text file (joins, leaves, gifts, flags)</label>
+      <label class="check"><input name="resume" type="checkbox"> pick the last stream back up on start</label>
       <p class="note" id="settings-path"></p>
       <div class="dialog-actions">
         <button type="button" class="btn" id="settings-cancel">Cancel</button>

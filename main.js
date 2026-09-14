@@ -42,7 +42,7 @@ function saveConfig() {
 
 function roomSummary(m) {
   return { room: m.username, state: m.state, message: m.stateMessage, viewers: m.room.viewers, live: m.room.live, title: m.room.title,
-    seen: m.tracker.users.size, present: m.tracker.present().length, flagged: m.flagged.size };
+    sid: m.stream?.sid ?? null, seen: m.tracker.users.size, flagged: m.flagged.size };
 }
 const roomList = () => [...monitors.values()].map(roomSummary);
 
@@ -52,10 +52,11 @@ function addRoom(name) {
   if (monitors.has(room)) return roomSummary(monitors.get(room));
   const m = new Monitor(room, cfg, { peers: () => monitors.values(), ...(DEMO ? { createConnection: createDemoConnection } : {}) });
   monitors.set(room, m);
-  m.on('join', ({ user }) => { for (const other of monitors.values()) if (other !== m) other.peerJoined(room, user); });
+  m.on('join', ({ user, t }) => { for (const other of monitors.values()) if (other !== m) other.peerJoined(room, user, t); });
   m.on('log', entry => send({ type: 'log', room, entry }));
   m.on('status', s => send({ type: 'status', ...s, rooms: roomList() }));
   m.on('flag', f => send({ type: 'flag', ...f }));
+  m.on('hop', f => send({ type: 'hop', ...f }));
   m.on('users', () => send({ type: 'users', room }));
   m.on('saved', r => {
     for (const other of monitors.values()) if (other !== m) other.refreshRoomIndex();
@@ -84,12 +85,12 @@ const getMonitor = name => {
 // ---------- IPC ----------
 ipcMain.handle('config:get', () => ({ ...configToJSON(cfg), configFile: CONFIG_FILE }));
 ipcMain.handle('config:set', (_e, patch) => {
-  const allowed = ['idleTimeoutMinutes', 'burnerAlertScore', 'autosaveMinutes', 'signApiKey', 'reconnectWhenLive', 'livePollSeconds', 'chatHistory', 'resume', 'chatToFile', 'eventsToFile', 'pruneAfterDays', 'maxUsers'];
+  const allowed = ['burnerAlertScore', 'autosaveMinutes', 'signApiKey', 'reconnectWhenLive', 'livePollSeconds', 'chatHistory', 'resume', 'pruneAfterDays', 'maxUsers', 'logKeepDays'];
   const next = { ...cfg };
   for (const k of allowed) if (patch && patch[k] !== undefined) next[k] = patch[k];
   normalizeConfig(next, null); // throws on bad values; dataDir already absolute
   Object.assign(cfg, next);
-  for (const m of monitors.values()) m.tracker.timeoutMs = cfg.idleTimeoutMinutes * 60_000;
+  for (const m of monitors.values()) m.tracker.chatHistory = cfg.chatHistory;
   saveConfig();
   return configToJSON(cfg);
 });
@@ -99,8 +100,8 @@ ipcMain.handle('rooms:remove', (_e, name) => { const r = removeRoom(name); persi
 ipcMain.handle('rooms:reconnect', (_e, name) => { getMonitor(name).reconnect(); return true; });
 ipcMain.handle('room:snapshot', (_e, name) => getMonitor(name).snapshot());
 ipcMain.handle('room:detail', (_e, name, id) => getMonitor(name).detail(id));
-ipcMain.handle('room:log', (_e, name) => getMonitor(name).logLines);
-ipcMain.handle('room:chat', (_e, name) => getMonitor(name).recentChat);
+// The current stream's log lives in memory; an earlier stream's is read from its file.
+ipcMain.handle('room:log', (_e, name, sid) => { const m = getMonitor(name); return sid && sid !== m.stream?.sid ? m.readLog(String(sid)) : m.logLines; });
 ipcMain.handle('room:flags', (_e, name) => [...getMonitor(name).flagged.values()]);
 ipcMain.handle('room:save', (_e, name) => getMonitor(name).save());
 ipcMain.handle('room:dismiss', (_e, name, users) => getMonitor(name).dismiss(Array.isArray(users) ? users : [users]));
@@ -109,8 +110,11 @@ ipcMain.handle('list:edit', (_e, room, list, op, names) => {
   if (!['watch', 'blacklist', 'pinned'].includes(list)) throw new Error('unknown list');
   const lists = roomLists(cfg, room);
   const set = lists[list];
-  for (const n of nameSet(Array.isArray(names) ? names : String(names).split(/[\s,]+/))) op === 'remove' ? set.delete(n) : set.add(n);
+  const clean = nameSet(Array.isArray(names) ? names : String(names).split(/[\s,]+/));
+  for (const n of clean) op === 'remove' ? set.delete(n) : set.add(n);
   saveConfig();
+  // A newly pinned or watched account gets its whole logged past copied into the history.
+  if (op !== 'remove' && list !== 'blacklist') monitors.get(normalizeUsername(room))?.retainEvents([...clean]);
   send({ type: 'lists', room: normalizeUsername(room), watch: [...lists.watch], blacklist: [...lists.blacklist], pinned: [...lists.pinned] });
   return [...set];
 });

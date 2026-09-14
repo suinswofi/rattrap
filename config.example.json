@@ -6,10 +6,10 @@
   "lists": {
     "the_great_sir_stromburg": {
       "watch": [],
-      "blacklist": []
+      "blacklist": [],
+      "pinned": []
     }
   },
-  "idleTimeoutMinutes": 15,
   "burnerAlertScore": 6,
   "signApiKey": "",
   "dataDir": "data",
@@ -17,5 +17,8 @@
   "resume": true,
   "reconnectWhenLive": true,
   "livePollSeconds": 60,
-  "chatHistory": 50
+  "chatHistory": 50,
+  "pruneAfterDays": 0,
+  "logKeepDays": 0,
+  "maxUsers": 10000
 }
