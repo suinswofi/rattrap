@@ -170,6 +170,25 @@ likes and gifts, one of which is on the other's blacklist, so every feature has 
 show. It uses a throwaway data folder and never touches `config.json`. Useful for trying the
 interface without a live stream, and for screenshots.
 
+## Updates
+
+A packaged Rat Trap checks GitHub for a newer release a few seconds after it starts, and whenever
+you press **Check for updates** in Settings. It only asks: a notice appears in the sidebar (and a
+popup) when a new version is out, and nothing is downloaded or installed until you press
+**Update**. Once downloaded, **Restart now** installs it; if you just close the app instead, the
+update goes in then. All three packages update themselves:
+
+- the Windows installer replaces the installed app;
+- the Windows portable exe downloads the new exe next to itself, checks it against the checksum
+  GitHub publishes for the release, and swaps it in when the app restarts, bumping the version
+  in the file name if the name contains one (`TikTok-Rat-Trap-1.1.0-portable.exe` becomes
+  `TikTok-Rat-Trap-1.2.0-portable.exe`, so update any shortcut you made). The replaced exe is
+  deleted on the next start;
+- the AppImage replaces itself in place.
+
+Running from the repo never checks. Set `RATTRAP_NO_UPDATE=1` to switch the check off in a
+packaged build.
+
 ## Building installers
 
 ```sh
@@ -209,6 +228,7 @@ packaged (all keys optional; copy `config.example.json` to start). The app edits
 | `chatHistory`        | `50`                       | recent chat messages kept per user in the stream snapshot (pinned and watched accounts keep everything in the history) |
 | `pruneAfterDays`     | `0`                        | forget accounts not seen for this many days; `0` keeps them forever. Pinned and watched accounts are kept |
 | `logKeepDays`        | `0`                        | delete stream log and snapshot files older than this many days; `0` keeps them forever |
+| `popupSeconds`       | `8`                        | how long popups about room activity (watched accounts, burners, hops, saves) stay; `0` turns them off. Errors and prompts still show |
 | `maxUsers`           | `10000`                    | cap on a stream's list per room; over it, the accounts seen longest ago are trimmed (they stay in history). `0` = unlimited |
 
 Keys from older versions (`idleTimeoutMinutes`, `chatToFile`, `eventsToFile`) are ignored and

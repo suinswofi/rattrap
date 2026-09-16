@@ -29,6 +29,11 @@
       <form id="add-watch" class="side-add"><input placeholder="add @viewer" autocomplete="off" spellcheck="false"><button type="submit">+</button></form>
     </section>
 
+    <div id="update" class="update" hidden>
+      <span id="update-text"></span>
+      <button id="update-btn" class="btn primary"></button>
+      <button id="update-later" class="icon-btn" title="Not now">×</button>
+    </div>
     <div class="side-footer">
       <button id="btn-settings" class="btn">Settings</button>
       <button id="btn-data" class="btn" title="Open the data folder">Data folder</button>
@@ -117,10 +122,12 @@
       <label>Forget accounts not seen for this many days (0 = keep forever; pinned and watched accounts are always kept) <input name="pruneAfterDays" type="number" min="0" step="1"></label>
       <label>Delete stream logs older than this many days (0 = keep forever; pinned and watched accounts' events are kept in the history regardless) <input name="logKeepDays" type="number" min="0" step="1"></label>
       <label>Maximum accounts in a stream's list (0 = unlimited; over the limit, the ones seen longest ago are trimmed but stay in history) <input name="maxUsers" type="number" min="0" step="100"></label>
+      <label>Activity popups stay for this many seconds (0 = no popups for watched accounts, burners, hops and saves; errors and prompts still show) <input name="popupSeconds" type="number" min="0" step="1"></label>
       <label>Euler Stream API key (optional) <input name="signApiKey" type="password" autocomplete="off"></label>
       <label class="check"><input name="reconnectWhenLive" type="checkbox"> wait for offline streamers to go live</label>
       <label class="check"><input name="resume" type="checkbox"> pick the last stream back up on start</label>
       <p class="note" id="settings-path"></p>
+      <p class="note version-row"><span id="settings-version"></span><button type="button" class="btn" id="btn-check-update">Check for updates</button></p>
       <div class="dialog-actions">
         <button type="button" class="btn" id="settings-cancel">Cancel</button>
         <button type="submit" class="btn primary">Save</button>

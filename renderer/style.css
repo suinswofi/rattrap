@@ -72,6 +72,12 @@ a { color: var(--purple-light); }
 .side-add input { flex: 1; min-width: 0; }
 .side-add button { width: 30px; padding: 0; background: var(--border); border: 0; border-radius: 4px; font-size: 16px; font-weight: 700; color: var(--text); }
 .side-add button:hover { background: var(--purple); color: #fff; }
+.update { margin: 12px 12px 0; padding: 10px 12px; border: 1px solid var(--border-strong); border-left: 4px solid var(--ok); border-radius: 6px; background: var(--elevated); display: grid; grid-template-columns: 1fr auto; gap: 6px 8px; align-items: center; font-size: 12px; color: var(--muted); }
+.update span { grid-column: 1; }
+.update .btn { grid-column: 1; justify-self: start; }
+.update .icon-btn { grid-column: 2; grid-row: 1; }
+.update.error { border-left-color: var(--live); }
+.update.busy { border-left-color: var(--purple); }
 .side-footer { display: flex; gap: 6px; padding: 12px; }
 .side-footer .btn { flex: 1; }
 
@@ -261,6 +267,7 @@ td .flag { display: inline-block; font-size: 10px; font-weight: 700; padding: 1p
 .dialog form > label:not(.check) { display: grid; gap: 4px; color: var(--muted); font-size: 12px; }
 .dialog form > label:not(.check) input { color: var(--text); }
 .dialog .note { margin: 4px 0 0; font-size: 11px; user-select: text; }
+.dialog .version-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; }
 
 #toasts { position: fixed; right: 16px; bottom: 16px; display: flex; flex-direction: column; gap: 8px; z-index: 30; max-width: 420px; }

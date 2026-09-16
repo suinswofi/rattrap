@@ -41,6 +41,7 @@ export const DEFAULTS = {
   chatHistory: 50,
   pruneAfterDays: 0,         // forget accounts not seen for this many days (0 = keep forever); pinned/watched are kept
   maxUsers: 10000,           // cap on the current stream's list; the oldest accounts are trimmed (kept in history)
+  popupSeconds: 8,           // how long activity popups (watched accounts, burners, hops, saves) stay; 0 = none
   logKeepDays: 0,            // delete per-stream log and snapshot files older than this (0 = keep forever); pinned/watched accounts' events are kept in the history
 };
 
@@ -76,6 +77,7 @@ export function normalizeConfig(cfg, baseDir) {
   cfg.chatHistory = Math.max(1, Number(cfg.chatHistory) || 50);
   cfg.pruneAfterDays = Math.max(0, Number(cfg.pruneAfterDays) || 0);
   cfg.logKeepDays = Math.max(0, Number(cfg.logKeepDays) || 0);
+  cfg.popupSeconds = Math.max(0, Number(cfg.popupSeconds ?? DEFAULTS.popupSeconds) || 0);
   cfg.maxUsers = Math.max(0, Math.floor(Number(cfg.maxUsers)) || 0); // 0 = unlimited
   cfg.signApiKey = String(cfg.signApiKey ?? '');
   if (baseDir && !isAbsolute(cfg.dataDir)) cfg.dataDir = pathJoin(baseDir, cfg.dataDir);

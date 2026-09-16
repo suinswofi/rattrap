@@ -8,6 +8,8 @@ import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
 import { Monitor, readConfigFile, normalizeConfig, configToJSON, normalizeUsername, nameSet, roomLists } from './monitor.js';
 import { createDemoConnection, DEMO_ROOMS } from './demo.js';
+import electronUpdater from 'electron-updater'; // CommonJS package: named imports do not work from ESM
+import { downloadPortable, installPortable, cleanupOld } from './portable-update.js';
 
 // RATTRAP_DEMO=1 runs against invented activity instead of TikTok, with throwaway data, and never
 // touches config.json. Handy for UI work and screenshots.
@@ -85,7 +87,7 @@ const getMonitor = name => {
 // ---------- IPC ----------
 ipcMain.handle('config:get', () => ({ ...configToJSON(cfg), configFile: CONFIG_FILE }));
 ipcMain.handle('config:set', (_e, patch) => {
-  const allowed = ['burnerAlertScore', 'autosaveMinutes', 'signApiKey', 'reconnectWhenLive', 'livePollSeconds', 'chatHistory', 'resume', 'pruneAfterDays', 'maxUsers', 'logKeepDays'];
+  const allowed = ['burnerAlertScore', 'autosaveMinutes', 'signApiKey', 'reconnectWhenLive', 'livePollSeconds', 'chatHistory', 'resume', 'pruneAfterDays', 'maxUsers', 'logKeepDays', 'popupSeconds'];
   const next = { ...cfg };
   for (const k of allowed) if (patch && patch[k] !== undefined) next[k] = patch[k];
   normalizeConfig(next, null); // throws on bad values; dataDir already absolute
@@ -119,10 +121,72 @@ ipcMain.handle('list:edit', (_e, room, list, op, names) => {
   return [...set];
 });
 ipcMain.handle('open:data', () => shell.openPath(cfg.dataDir));
+ipcMain.handle('update:get', () => update);
+ipcMain.handle('update:check', () => checkForUpdates(true));
+ipcMain.handle('update:download', () => downloadUpdate());
+ipcMain.handle('update:install', () => installUpdate());
+ipcMain.handle('update:open', () => shell.openExternal(RELEASES_URL));
 ipcMain.handle('open:external', (_e, url) => {
   if (!/^https:\/\/(www\.)?tiktok\.com\//.test(String(url))) throw new Error('refusing to open non-TikTok URL');
   return shell.openExternal(url);
 });
+
+// ---------- updates ----------
+// A packaged build asks GitHub for a newer release shortly after start (and when the user presses Check for
+// updates). It only tells the user; nothing is downloaded or installed until they choose to from the notice.
+// electron-updater handles the Windows installer and the AppImage. The Windows portable exe is not something
+// it can update, so portable-update.js fetches the new exe from the release and swaps it in on restart.
+// RATTRAP_NO_UPDATE=1 switches the check off.
+const RELEASES_URL = 'https://github.com/suinswofi/rattrap/releases/latest';
+const PORTABLE_EXE = process.env.PORTABLE_EXECUTABLE_FILE; // set by the electron-builder portable launcher
+const PORTABLE = !!PORTABLE_EXE;
+let portableFiles = null; // { tmp, finalPath } once the portable exe is downloaded
+const UPDATES = app.isPackaged && !DEMO && process.env.RATTRAP_NO_UPDATE !== '1';
+const autoUpdater = UPDATES ? electronUpdater.autoUpdater : null; // the getter builds the platform updater; only wanted when packaged
+// state: idle | checking | none | available | downloading | ready | error
+let update = { state: 'idle', version: null, current: app.getVersion(), portable: PORTABLE, enabled: UPDATES };
+const sendUpdate = patch => { update = { ...update, ...patch }; send({ type: 'update', ...update }); };
+
+if (UPDATES) {
+  autoUpdater.autoDownload = false;
+  autoUpdater.autoInstallOnAppQuit = true; // a downloaded update the user chose still installs if they just close the app
+  autoUpdater.on('update-available', info => sendUpdate({ state: 'available', version: info.version, message: null }));
+  autoUpdater.on('update-not-available', info => sendUpdate({ state: 'none', version: info.version, message: null }));
+  autoUpdater.on('download-progress', p => sendUpdate({ state: 'downloading', percent: Math.round(p.percent) }));
+  autoUpdater.on('update-downloaded', info => sendUpdate({ state: 'ready', version: info.version }));
+  // A failed automatic check (offline, GitHub down) is not worth bothering the user about; a failed manual check or download is.
+  autoUpdater.on('error', e => { console.error('update:', e.message); sendUpdate(update.state === 'checking' && !update.manual ? { state: 'idle' } : { state: 'error', message: e.message }); });
+}
+
+async function downloadUpdate() {
+  if (update.state !== 'available') throw new Error('nothing to download');
+  sendUpdate({ state: 'downloading', percent: 0 });
+  if (!PORTABLE) { await autoUpdater.downloadUpdate(); return true; } // progress and 'ready' arrive through the events above
+  try {
+    portableFiles = await downloadPortable({ exePath: PORTABLE_EXE, currentVersion: app.getVersion(), version: update.version,
+      onProgress: percent => sendUpdate({ state: 'downloading', percent }) });
+    sendUpdate({ state: 'ready' });
+  } catch (e) { console.error('update:', e.message); sendUpdate({ state: 'error', message: e.message }); }
+  return true;
+}
+
+async function installUpdate() {
+  if (update.state !== 'ready') throw new Error('no update downloaded');
+  if (!PORTABLE) { autoUpdater.quitAndInstall(true, true); return true; } // silent install, then relaunch
+  const files = portableFiles; portableFiles = null;
+  try { await installPortable({ exePath: PORTABLE_EXE, ...files }); }
+  catch (e) { portableFiles = files; sendUpdate({ state: 'error', message: `could not replace ${PORTABLE_EXE}: ${e.message}` }); return false; }
+  app.quit();
+  return true;
+}
+
+async function checkForUpdates(manual = false) {
+  if (!UPDATES) return update;
+  if (['checking', 'downloading', 'ready'].includes(update.state)) return update;
+  sendUpdate({ state: 'checking', manual });
+  try { await autoUpdater.checkForUpdates(); } catch (e) { sendUpdate(manual ? { state: 'error', message: e.message } : { state: 'idle' }); }
+  return update;
+}
 
 // ---------- window ----------
 function createWindow() {
@@ -134,6 +198,7 @@ function createWindow() {
   win.loadFile(join(HERE, 'renderer', 'index.html'));
   win.webContents.setWindowOpenHandler(({ url }) => { if (/^https:\/\/(www\.)?tiktok\.com\//.test(url)) shell.openExternal(url); return { action: 'deny' }; });
   win.on('closed', () => { win = null; });
+  win.webContents.once('did-finish-load', () => setTimeout(() => checkForUpdates(false), 3000));
 
   // Development aid: RATTRAP_SCREENSHOT=/path/out.png captures the window after a few seconds and quits.
   if (process.env.RATTRAP_SCREENSHOT) {
@@ -151,6 +216,7 @@ function createWindow() {
 app.whenReady().then(() => {
   if (!cfg) return;
   createWindow();
+  if (PORTABLE) cleanupOld(dirname(PORTABLE_EXE));
   // Rooms from config, plus any given on the command line for this session only (`npm start -- someone`).
   const extra = process.argv.slice(app.isPackaged ? 1 : 2).filter(a => !a.startsWith('-'));
   for (const r of (cfg.rooms.length ? cfg.rooms : [cfg.username])) { try { persistedRooms.add(addRoom(r).room); } catch (e) { console.error(e.message); } }
@@ -162,5 +228,12 @@ let quitting = false;
 app.on('before-quit', () => {
   if (quitting) return; quitting = true;
   for (const m of monitors.values()) { try { m.stop(); } catch (e) { console.error(e.message); } }
+});
+// A downloaded portable update the user never pressed Restart for still goes in when the app closes, like the installer's does.
+app.on('will-quit', e => {
+  if (!PORTABLE || !portableFiles) return;
+  const files = portableFiles; portableFiles = null;
+  e.preventDefault();
+  installPortable({ exePath: PORTABLE_EXE, ...files, relaunch: false }).catch(err => console.error('update:', err.message)).finally(() => app.quit());
 });
 app.on('window-all-closed', () => app.quit());

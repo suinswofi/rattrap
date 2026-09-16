@@ -20,5 +20,6 @@
   "chatHistory": 50,
   "pruneAfterDays": 0,
   "logKeepDays": 0,
+  "popupSeconds": 8,
   "maxUsers": 10000
 }

@@ -51,6 +51,14 @@ function toast(title, text, kind = '', ttl = 8000, target = null, action = null)
   setTimeout(() => el.remove(), ttl);
 }
 
+// Popups about room activity (watched accounts, burners, hops, saves) honour the popup duration setting: `ttl` is the
+// duration at the default setting of 8 s, scaled to the user's; 0 switches them off. Errors and prompts use toast() directly.
+function notify(title, text, kind, ttl, target) {
+  const secs = state.config?.popupSeconds ?? 8;
+  if (secs <= 0) return;
+  toast(title, text, kind, ttl * secs / 8, target);
+}
+
 const isMonitored = name => state.rooms.some(r => r.room === String(name).replace(/^@/, '').toLowerCase());
 const roomLists = room => state.config?.lists?.[room] ?? { watch: [], blacklist: [], pinned: [] };
 const isStarred = user => { const l = roomLists(state.current); return !!user && (l.pinned.includes(user) || l.watch.includes(user)); };
@@ -602,14 +610,14 @@ api.onEvent(ev => {
     case 'log':
       if (ev.room) appendLine(ev.room, ev.entry);
       if (ev.entry.kind === 'error') toast(ev.room ? `@${ev.room}` : 'Rat Trap', ev.entry.text, 'error');
-      else if (ev.entry.watched && ['join', 'rejoin', 'chat', 'gift', 'follow', 'share'].includes(ev.entry.kind)) toast(`★ @${ev.entry.user} in @${ev.room}`, `${ev.entry.kind}: ${ev.entry.text}`, '', 8000, { room: ev.room, user: ev.entry.user });
+      else if (ev.entry.watched && ['join', 'rejoin', 'chat', 'gift', 'follow', 'share'].includes(ev.entry.kind)) notify(`★ @${ev.entry.user} in @${ev.room}`, `${ev.entry.kind}: ${ev.entry.text}`, '', 8000, { room: ev.room, user: ev.entry.user });
       break;
     case 'flag':
-      toast(`⚑ @${ev.user} in @${ev.room} — score ${ev.score}`, ev.reasons.join('; '), 'flag', 12000, { room: ev.room, user: ev.user });
+      notify(`⚑ @${ev.user} in @${ev.room} — score ${ev.score}`, ev.reasons.join('; '), 'flag', 12000, { room: ev.room, user: ev.user });
       if (ev.room === state.current) scheduleRefresh();
       break;
     case 'hop':
-      toast(`↔ @${ev.user} in @${ev.room}`, ev.text, 'flag', 15000, { room: ev.room, user: ev.user });
+      notify(`↔ @${ev.user} in @${ev.room}`, ev.text, 'flag', 15000, { room: ev.room, user: ev.user });
       if (ev.room === state.current) scheduleRefresh();
       break;
     case 'status': case 'rooms': {
@@ -623,7 +631,8 @@ api.onEvent(ev => {
     }
     case 'users': if (ev.room === state.current) scheduleRefresh(); break;
     case 'lists': state.config = { ...state.config, lists: { ...(state.config?.lists ?? {}), [ev.room]: { watch: ev.watch, blacklist: ev.blacklist, pinned: ev.pinned ?? [] } } }; renderLists(); scheduleRefresh(); break;
-    case 'saved': if (ev.room === state.current) toast(`@${ev.room} saved`, `${ev.count} users written to the stream snapshot and the room history`, 'ok', 4000); break;
+    case 'update': onUpdate(ev); break;
+    case 'saved': if (ev.room === state.current) notify(`@${ev.room} saved`, `${ev.count} users written to the stream snapshot and the room history`, 'ok', 4000); break;
   }
 });
 
@@ -729,6 +738,48 @@ $('#btn-remove').addEventListener('click', async () => {
 });
 $('#btn-data').addEventListener('click', () => api.openData());
 
+// ---------- updates ----------
+// The main process checks GitHub for a newer release and reports what it found; nothing is downloaded or
+// installed until the user presses the button in the notice. The Windows portable build cannot replace
+// itself, so it is sent to the release page instead.
+let updateHidden = null; // state the user dismissed with ×; the notice comes back when the state changes
+const updateErr = err => toast('Update', err.message, 'error');
+function renderUpdate(u) {
+  state.update = u;
+  const bar = $('#update'), btn = $('#update-btn');
+  const v = u.version ? `Version ${u.version}` : 'A new version';
+  let text = '', label = '', run = null, cls = '';
+  switch (u.state) {
+    case 'available':
+      if (u.portable) { text = `${v} is available (you have ${u.current}). The portable build cannot update itself; get it from the release page.`; label = 'Open release page'; run = api.openReleases; }
+      else { text = `${v} is available (you have ${u.current}).`; label = `Update to ${u.version}`; run = api.downloadUpdate; }
+      break;
+    case 'downloading': text = `Downloading ${u.version}… ${u.percent ?? 0}%`; cls = 'busy'; break;
+    case 'ready': text = `${v} is downloaded. It installs when Rat Trap restarts.`; label = 'Restart now'; run = api.installUpdate; break;
+    case 'error': text = `Update failed: ${u.message}`; label = 'Open release page'; run = api.openReleases; cls = 'error'; break;
+  }
+  bar.className = `update ${cls}`;
+  bar.hidden = !text || updateHidden === u.state;
+  $('#update-text').textContent = text;
+  btn.hidden = !label; btn.textContent = label; btn.onclick = () => run().catch(updateErr);
+  const check = $('#btn-check-update');
+  check.disabled = !u.enabled || ['checking', 'downloading'].includes(u.state);
+  check.textContent = u.state === 'checking' ? 'Checking…' : 'Check for updates';
+  check.title = u.enabled ? '' : 'Only the installed app checks for updates';
+  $('#settings-version').textContent = `TikTok Rat Trap ${u.current}`;
+}
+function onUpdate(u) {
+  const was = state.update?.state;
+  renderUpdate(u);
+  if (u.state === was) return;
+  if (u.state === 'available') toast('Update available', `TikTok Rat Trap ${u.version} is out; you have ${u.current}.`, 'ok', 15000, null, { label: u.portable ? 'Open release page' : 'Update', run: () => (u.portable ? api.openReleases() : api.downloadUpdate()).catch(updateErr) });
+  else if (u.state === 'ready') toast('Update downloaded', `Version ${u.version} installs when Rat Trap restarts.`, 'ok', 15000, null, { label: 'Restart now', run: () => api.installUpdate().catch(updateErr) });
+  else if (u.state === 'none' && u.manual) toast('Up to date', `${u.current} is the latest version.`, 'ok', 4000);
+  else if (u.state === 'error' && u.manual) toast('Update check failed', u.message, 'error');
+}
+$('#update-later').addEventListener('click', () => { updateHidden = state.update?.state ?? null; $('#update').hidden = true; });
+$('#btn-check-update').addEventListener('click', () => api.checkUpdate().then(renderUpdate).catch(updateErr));
+
 // settings
 $('#btn-settings').addEventListener('click', async () => {
   await loadConfig();
@@ -751,6 +802,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') { if (!$('#h
 // ---------- boot ----------
 (async () => {
   await loadConfig();
+  renderUpdate(await api.updateState());
   await refreshRooms();
   setTab('users');
   setInterval(refreshSnapshot, 2000);

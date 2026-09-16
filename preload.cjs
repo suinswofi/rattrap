@@ -18,6 +18,11 @@ contextBridge.exposeInMainWorld('rattrap', {
   editList: (room, list, op, names) => ipcRenderer.invoke('list:edit', room, list, op, names),
   openData: () => ipcRenderer.invoke('open:data'),
   openExternal: url => ipcRenderer.invoke('open:external', url),
+  updateState: () => ipcRenderer.invoke('update:get'),
+  checkUpdate: () => ipcRenderer.invoke('update:check'),
+  downloadUpdate: () => ipcRenderer.invoke('update:download'),
+  installUpdate: () => ipcRenderer.invoke('update:install'),
+  openReleases: () => ipcRenderer.invoke('update:open'),
   onEvent: cb => {
     const handler = (_event, payload) => cb(payload);
     ipcRenderer.on('rattrap:event', handler);
