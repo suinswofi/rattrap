@@ -243,6 +243,8 @@ td .flag { display: inline-block; font-size: 10px; font-weight: 700; padding: 1p
 .streams td { padding: 3px 6px; border-bottom: 1px solid var(--border); color: var(--muted); }
 .streams td:not(:first-child), .streams th:not(:first-child) { text-align: right; font-variant-numeric: tabular-nums; }
 .streams tr.current td { color: var(--text); background: var(--purple-dim); }
+.streams tbody tr { cursor: pointer; }
+.streams tbody tr:hover td { background: var(--hover); color: var(--text); }
 .timeline .line { padding: 3px 0; }
 .timeline .k { width: 44px; }
 .tl-stream { margin: 8px 0 2px; font-size: 11px; font-weight: 600; color: var(--purple-light); text-transform: uppercase; letter-spacing: .4px; }
