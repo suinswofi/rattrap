@@ -245,6 +245,16 @@ td .flag { display: inline-block; font-size: 10px; font-weight: 700; padding: 1p
 .streams tr.current td { color: var(--text); background: var(--purple-dim); }
 .streams tbody tr { cursor: pointer; }
 .streams tbody tr:hover td { background: var(--hover); color: var(--text); }
+.streams tbody tr.selected td { background: var(--purple); color: #fff; }
+.streams tbody tr.selected .linkbtn { color: #fff; }
+.streams .go { margin-left: 3px; font-size: 10px; opacity: 0; }
+/* the ↗ costs the first column a few pixels; take them back off the numeric ones */
+.streams td:not(:first-child), .streams th:not(:first-child) { padding-left: 4px; padding-right: 4px; }
+.streams tbody tr:hover .go, .streams tbody tr.selected .go { opacity: 1; }
+.linkbtn { background: none; border: 0; padding: 0; font: inherit; color: var(--purple-light); white-space: nowrap; }
+.linkbtn:hover { text-decoration: underline; }
+.tl-filter { margin-left: 6px; font-size: 11px; font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--purple-light); }
+.tl-filter .linkbtn { margin-left: 6px; color: var(--muted); }
 .timeline .line { padding: 3px 0; }
 .timeline .k { width: 44px; }
 .tl-stream { margin: 8px 0 2px; font-size: 11px; font-weight: 600; color: var(--purple-light); text-transform: uppercase; letter-spacing: .4px; }

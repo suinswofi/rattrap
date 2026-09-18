@@ -15,7 +15,7 @@ const state = {
   logSid: null,         // stream shown on the Chat/Log tabs; null = the live one
   pastLog: null,        // { room, sid, entries } fetched for an earlier stream
   hiddenKinds: new Set(['chat']), starredOnly: false, shown: { log: LOG_CHUNK, chat: LOG_CHUNK },
-  detailUser: null, refreshTimer: null,
+  detailUser: null, detailSid: null, refreshTimer: null,
 };
 
 // ---------- formatting ----------
@@ -491,12 +491,13 @@ function appendLine(room, entry) {
 // ---------- detail drawer ----------
 async function openDetail(username) {
   if (!state.current || !username) return;
+  if (state.detailUser !== username) state.detailSid = null;
   state.detailUser = username;
   $('#detail').hidden = false;
   await renderDetail();
   renderTable();
 }
-function closeDetail() { state.detailUser = null; $('#detail').hidden = true; renderTable(); }
+function closeDetail() { state.detailUser = null; state.detailSid = null; $('#detail').hidden = true; renderTable(); }
 
 async function renderDetail() {
   if (!state.detailUser || !state.current) return;
@@ -539,18 +540,21 @@ async function renderDetail() {
       ['previous nicknames', h.nicknames.length ? esc(h.nicknames.join(', ')) : '–'],
     ]));
     if (h.streams.length) parts.push(`<table class="streams"><thead><tr><th>stream</th><th>joins</th><th>chats</th><th>likes</th><th>gifts</th><th>shares</th><th>hops</th></tr></thead><tbody>${[...h.streams].reverse().map(s =>
-      `<tr class="${s.sid === cur ? 'current' : ''}" data-sid="${esc(s.sid)}" title="seen ${fmtTime(s.firstSeen)}–${fmtTime(s.lastSeen)} · click to see their chat in this stream"><td>${esc(streamLabel(s.sid))}</td><td>${s.joins}</td><td>${s.chats}</td><td>${s.likes}</td><td>${s.gifts}${s.coins ? ` (${s.coins})` : ''}</td><td>${s.shares ?? 0}</td><td>${s.hops ?? 0}</td></tr>`).join('')}</tbody></table>`);
+      `<tr class="${s.sid === cur ? 'current' : ''} ${s.sid === state.detailSid ? 'selected' : ''}" data-sid="${esc(s.sid)}" title="seen ${fmtTime(s.firstSeen)}–${fmtTime(s.lastSeen)} · click to show only this stream below"><td>${esc(streamLabel(s.sid))} <button class="linkbtn go" data-go="${esc(s.sid)}" title="Open the Chat tab on this stream">↗</button></td><td>${s.joins}</td><td>${s.chats}</td><td>${s.likes}</td><td>${s.gifts}${s.coins ? ` (${s.coins})` : ''}</td><td>${s.shares ?? 0}</td><td>${s.hops ?? 0}</td></tr>`).join('')}</tbody></table>`);
   }
   parts.push('<h4>Other monitored rooms</h4>', d.rooms.length
     ? `<ul class="rooms-list">${d.rooms.map(r => `<li class="${r.blacklisted ? 'bl' : ''}">@${esc(r.room)}${r.blacklisted ? ' <span class="flag bl">blacklisted</span>' : ''}${r.liveNow ? ' <span class="flag bl">in their stream now</span>' : ''}: <span class="${r.follows === true ? 'follows' : 'nofollow'}">${r.follows === true ? 'FOLLOWS host' : r.follows === false ? 'does not follow host' : 'follow status unknown'}</span>, seen ${plural(r.streamsSeen ?? r.daysSeen, 'stream')}, last ${fmtDate(r.lastSeen)}${r.username !== d.username ? ` (as @${esc(r.username)})` : ''}</li>`).join('')}</ul>`
     : `<p class="note">Not seen in any other monitored room${state.snap?.otherRooms?.length ? '' : ' (no other room histories yet)'}.</p>`);
 
   // Timeline: everything ever logged for pinned/watched accounts; otherwise what this stream's log holds.
+  const picked = state.detailSid;
   const timeline = (events, title, note) => {
-    if (!events.length) return [`<h4>${title}</h4>`, `<p class="note">${note}</p>`];
+    const shown = picked ? events.filter(e => (e.sid ?? null) === picked) : events;
+    const head = `<h4>${title}${shown.length ? ` (${shown.length.toLocaleString()})` : ''}${picked ? ` <span class="tl-filter">stream ${esc(streamLabel(picked))}<button class="linkbtn" id="d-allstreams">show all</button></span>` : ''}</h4>`;
+    if (!shown.length) return [head, `<p class="note">${picked ? 'Nothing logged for that stream.' : note}</p>`];
     const groups = [];
-    for (const e of events) { const g = groups[groups.length - 1]; if (g && g.sid === (e.sid ?? null)) g.items.push(e); else groups.push({ sid: e.sid ?? null, items: [e] }); }
-    return [`<h4>${title} (${events.length.toLocaleString()})</h4>`, `<div class="timeline">${groups.map(g => `<div class="tl-stream">${g.sid ? `stream ${esc(streamLabel(g.sid))}` : 'no stream'} · ${plural(g.items.length, 'event')}</div>${g.items.map(e => `<div class="line ${esc(e.kind)}"><span class="t" title="${esc(fmtDateTime(e.t))}">${fmtTime(e.t)}</span><span class="k">${esc(e.kind)}</span><span class="m">${esc(e.text)}</span></div>`).join('')}`).join('')}</div>`];
+    for (const e of shown) { const g = groups[groups.length - 1]; if (g && g.sid === (e.sid ?? null)) g.items.push(e); else groups.push({ sid: e.sid ?? null, items: [e] }); }
+    return [head, `<div class="timeline">${groups.map(g => `<div class="tl-stream">${g.sid ? `stream ${esc(streamLabel(g.sid))}` : 'no stream'} · ${plural(g.items.length, 'event')}</div>${g.items.map(e => `<div class="line ${esc(e.kind)}"><span class="t" title="${esc(fmtDateTime(e.t))}">${fmtTime(e.t)}</span><span class="k">${esc(e.kind)}</span><span class="m">${esc(e.text)}</span></div>`).join('')}`).join('')}</div>`];
   };
   if (d.retained) parts.push(...timeline(d.events, 'Everything logged', 'Nothing logged yet. Events are kept from now on.'));
   else {
@@ -563,11 +567,18 @@ async function renderDetail() {
   $('#d-watch').onclick = async () => { await api.editList(state.current, 'watch', watched ? 'remove' : 'add', [d.username]); await loadConfig(); renderDetail(); };
   $('#d-pin').onclick = async () => { await api.editList(state.current, 'pinned', pinned ? 'remove' : 'add', [d.username]); await loadConfig(); renderDetail(); scheduleRefresh(); };
   $('#d-open').onclick = () => api.openExternal(`https://www.tiktok.com/@${encodeURIComponent(d.username)}`);
-  // A stream row opens the Chat tab on that stream, filtered to this account.
+  // A stream row shows only that stream in the timeline below; click it again for every stream.
   for (const row of document.querySelectorAll('#detail-body .streams tr[data-sid]')) row.onclick = () => {
+    state.detailSid = state.detailSid === row.dataset.sid ? null : row.dataset.sid;
+    renderDetail();
+  };
+  const showAll = $('#d-allstreams'); if (showAll) showAll.onclick = () => { state.detailSid = null; renderDetail(); };
+  // The ↗ next to a stream's name opens the Chat tab on that stream, filtered to this account.
+  for (const b of document.querySelectorAll('#detail-body .streams button[data-go]')) b.onclick = e => {
+    e.stopPropagation();
     state.search = d.username; $('#search').value = d.username; state.shown = { log: LOG_CHUNK, chat: LOG_CHUNK };
     setTab('chat');
-    showStream(row.dataset.sid);
+    showStream(b.dataset.go);
   };
 }
 
@@ -686,7 +697,7 @@ const HELP = {
 <p>The <b>Log</b> and <b>Chat</b> tabs show one stream at a time: pick it with the <b>Stream</b> drop-down. The whole log is kept, nothing rolls off. Only the newest lines are drawn at first; <b>Show earlier</b> loads more. Filter by kind with the chips, by account with the search box, and use <b>★ pinned &amp; watched</b> to see only the accounts you care about.</p>
 <p>TikTok never says when someone <b>leaves</b>, so Rat Trap does not guess: there are no "left" lines and no idle timeouts. A repeated join means the account left and came back; the log says which time it is.</p>
 <p>Each stream's log is a file in the data folder (<code>log-&lt;room&gt;-&lt;stream&gt;.jsonl</code>, one JSON object per line). They are kept forever unless <b>Delete stream logs older than</b> is set in Settings. Pinned and watched accounts keep their events inside the room history regardless, so their full record never goes away.</p>
-<p>The detail drawer of any account lists every stream it was seen in, with its joins, chats, likes, gifts, shares and hops for each, so you can tell a first-timer from a regular at a glance. Click a stream in that list to open the Chat tab on that stream, filtered to the account.</p>`,
+<p>The detail drawer of any account lists every stream it was seen in, with its joins, chats, likes, gifts, shares and hops for each, so you can tell a first-timer from a regular at a glance. Click a stream in that list to show only that stream in the timeline below — click it again, or <b>show all</b>, to go back to every stream. The <b>↗</b> beside a stream's name opens the Chat tab on that stream, filtered to the account.</p>`,
   },
 };
 function openHelp(key) {

@@ -69,7 +69,9 @@ The header always says which stream the Users, Burners and Blacklist hits tabs a
   the account was seen in** (joins, chats, likes, gifts and hops for each), other monitored rooms
   the account appeared in and whether it follows their host, and a timeline. For pinned and
   watched accounts the timeline is everything ever logged about them, grouped by stream; for
-  anyone else it is what this stream's log holds. Buttons to watch, pin, or open on TikTok.
+  anyone else it is what this stream's log holds. Click a stream in that table to cut the timeline
+  down to that one stream (click it again, or **show all**, for every stream); the **↗** beside a
+  stream's name opens the Chat tab on that stream instead. Buttons to watch, pin, or open on TikTok.
 - **Toasts** pop up for hops, flagged joins, watched users, saves and errors. Click one to jump to
   the account.
 - **Settings**: alert score, autosave, live polling, log retention, history pruning, Euler Stream
