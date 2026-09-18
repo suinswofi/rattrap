@@ -38,16 +38,19 @@ a { color: var(--purple-light); }
 
 /* ---------- sidebar ---------- */
 #sidebar { background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; }
-.brand { display: flex; align-items: center; gap: 10px; padding: 14px 16px; font-weight: 700; font-size: 16px; letter-spacing: .2px; border-bottom: 1px solid var(--border); }
+.brand { flex: none; display: flex; align-items: center; gap: 10px; padding: 14px 16px; font-weight: 700; font-size: 16px; letter-spacing: .2px; border-bottom: 1px solid var(--border); }
 .brand-mark { width: 30px; height: 30px; border-radius: 6px; }
-.side-section { padding: 12px 12px 6px; border-bottom: 1px solid var(--border); }
-.side-section:nth-of-type(1) { flex: 1 1 auto; min-height: 120px; overflow: auto; }
-.side-section h3 { margin: 0 4px 8px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+/* Each section keeps its heading and its add form on screen and lets the list scroll instead,
+   so a long watch list cannot push the + button or the footer out of the sidebar. */
+.side-section { flex: 0 1 auto; padding: 12px 12px 6px; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; }
+.side-section:has(.side-list:not(:empty)) { min-height: 9em; }
+.side-section:nth-of-type(1) { flex: 1 1 auto; min-height: 120px; }
+.side-section h3 { flex: none; margin: 0 4px 8px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); display: flex; align-items: center; gap: 6px; white-space: nowrap; }
 .for-room { color: var(--purple-light); text-transform: none; letter-spacing: 0; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 0 1 auto; min-width: 0; }
 .hint { flex: none; }
 .hint { display: inline-grid; place-items: center; width: 16px; height: 16px; padding: 0; border: 0; border-radius: 50%; background: var(--border-strong); color: var(--text); font-size: 11px; font-weight: 700; cursor: pointer; }
 .hint:hover { background: var(--purple); color: #fff; }
-.side-list { list-style: none; margin: 0; padding: 0; }
+.side-list { list-style: none; margin: 0; padding: 0; min-height: 0; overflow-y: auto; }
 .side-list li { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 4px; cursor: pointer; color: var(--muted); }
 .side-list li:hover { background: var(--hover); color: var(--text); }
 .side-list li.active { background: var(--purple-dim); color: var(--text); }
@@ -68,17 +71,17 @@ a { color: var(--purple-light); }
 .dot.waiting { background: var(--warn); }
 @keyframes pulse { 50% { opacity: .35; } }
 .badge { display: inline-block; min-width: 18px; padding: 1px 6px; border-radius: 9px; background: var(--live); color: #fff; font-size: 11px; font-weight: 600; text-align: center; }
-.side-add { display: flex; gap: 6px; margin: 6px 0 4px; }
+.side-add { flex: none; display: flex; gap: 6px; margin: 6px 0 4px; }
 .side-add input { flex: 1; min-width: 0; }
 .side-add button { width: 30px; padding: 0; background: var(--border); border: 0; border-radius: 4px; font-size: 16px; font-weight: 700; color: var(--text); }
 .side-add button:hover { background: var(--purple); color: #fff; }
-.update { margin: 12px 12px 0; padding: 10px 12px; border: 1px solid var(--border-strong); border-left: 4px solid var(--ok); border-radius: 6px; background: var(--elevated); display: grid; grid-template-columns: 1fr auto; gap: 6px 8px; align-items: center; font-size: 12px; color: var(--muted); }
+.update { flex: none; margin: 12px 12px 0; padding: 10px 12px; border: 1px solid var(--border-strong); border-left: 4px solid var(--ok); border-radius: 6px; background: var(--elevated); display: grid; grid-template-columns: 1fr auto; gap: 6px 8px; align-items: center; font-size: 12px; color: var(--muted); }
 .update span { grid-column: 1; }
 .update .btn { grid-column: 1; justify-self: start; }
 .update .icon-btn { grid-column: 2; grid-row: 1; }
 .update.error { border-left-color: var(--live); }
 .update.busy { border-left-color: var(--purple); }
-.side-footer { display: flex; gap: 6px; padding: 12px; }
+.side-footer { flex: none; display: flex; gap: 6px; padding: 12px; }
 .side-footer .btn { flex: 1; }
 
 /* ---------- controls ---------- */
