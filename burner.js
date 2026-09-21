@@ -49,14 +49,19 @@ export function hopText(hop) {
  * @param {Array}  [ctx.rooms]     entries from loadRoomIndex().lookup(u)
  * @param {Array}  [ctx.liveIn]    blacklisted rooms whose current stream the user has also been seen in
  * @param {Set}    [ctx.blacklist] lowercase streamer usernames
+ * @param {boolean}[ctx.whitelisted] this account is trusted: collect no signals at all
  * @param {string} [ctx.sid]       id of the current stream (so it is not counted as an earlier visit)
  *
  * TikTok does not deliver account creation dates or bios in LIVE events (checked against real
  * rooms: always empty), so there are deliberately no account-age or bio signals. It sends no
  * "user left" event either, so there are no signals about how long someone stayed.
- * @returns {{score:number, blacklistScore:number, reasons:string[], blacklisted:string[]}}
+ * @returns {{score:number, blacklistScore:number, reasons:string[], blacklisted:string[], whitelisted:boolean}}
  */
 export function scoreUser(u, ctx = {}) {
+  // A whitelisted account is one the streamer has vouched for: no signal is collected, so it can
+  // never be flagged, however much a heuristic would otherwise have to say about it.
+  if (ctx.whitelisted) return { score: 0, blacklistScore: 0, reasons: [], blacklisted: [], whitelisted: true };
+
   const reasons = [];
   let score = 0, blacklistScore = 0;
   const hit = (key, text) => { score += WEIGHTS[key]; if (BLACKLIST_KEYS.has(key)) blacklistScore += WEIGHTS[key]; reasons.push(text); };
@@ -94,5 +99,5 @@ export function scoreUser(u, ctx = {}) {
   if (u.joins > 0 && !u.chats && !u.likes && !u.gifts && !u.shares) hit('lurker', 'never interacted');
   if (u.joins >= 3) hit('repeatJoins', `joined ${u.joins} times this stream`);
 
-  return { score, blacklistScore, reasons, blacklisted };
+  return { score, blacklistScore, reasons, blacklisted, whitelisted: false };
 }

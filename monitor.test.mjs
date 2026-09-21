@@ -242,8 +242,93 @@ test('watch list and blacklist are per room; legacy global lists migrate', async
     assert.deepEqual([...roomLists(legacy, 'anyroom').blacklist], ['oldrival']);
     assert.deepEqual([...roomLists(legacy, 'Another').watch], ['old_vip']);
     const json = configToJSON(legacy);
-    assert.deepEqual(json.lists.anyroom, { watch: ['old_vip'], blacklist: ['oldrival'], pinned: [] });
+    assert.deepEqual(json.lists.anyroom, { watch: ['old_vip'], blacklist: ['oldrival'], whitelist: [], pinned: [] });
     assert.equal(json.legacyLists, undefined);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('a whitelisted viewer is never scored or flagged, and is dropped from the suspect lists', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'rattrap-'));
+  try {
+    // badguy is blacklisted by host; `fan` follows badguy, so in host's room they are a blacklist hit.
+    const cfg = cfgFor(dir);
+    const badConn = new FakeConnection();
+    const bad = new Monitor('badguy', cfg, { createConnection: () => badConn });
+    bad.start(); await tick();
+    badConn.emit(WebcastEvent.MEMBER, user('fan', { id: 'F1', followInfo: { followerCount: '0', followingCount: '0', followStatus: '1' } }));
+    bad.save();
+    bad.stop();
+
+    const conn = new FakeConnection();
+    const host = new Monitor('host', cfg, { createConnection: () => conn });
+    const flags = [];
+    host.on('flag', f => flags.push(f));
+    host.start(); await tick();
+    conn.emit(WebcastEvent.MEMBER, user('fan', { id: 'F1', followInfo: { followerCount: '0', followingCount: '0' } }));
+    conn.emit(WebcastEvent.MEMBER, user('user123456789', { nickname: 'user123456789' }));
+
+    const before = host.row(host.tracker.get('fan'));
+    assert.ok(before.score > 0, 'the fan scores without the whitelist');
+    assert.deepEqual(before.blacklisted, ['badguy']);
+    assert.deepEqual(flags.map(f => f.user), ['fan'], 'the fan is flagged first');
+    assert.ok(host.suspects().some(r => r.username === 'fan'));
+
+    // whitelisting exempts the account completely
+    host.lists.whitelist.add('fan');
+    host.unflag(['fan']);
+    const after = host.row(host.tracker.get('fan'));
+    assert.equal(after.score, 0);
+    assert.equal(after.blacklistScore, 0);
+    assert.deepEqual(after.reasons, []);
+    assert.deepEqual(after.blacklisted, []);
+    assert.equal(after.whitelisted, true);
+    assert.ok(after.flags.includes('white'));
+    assert.ok(!after.flags.some(f => f.startsWith('BL:') || f.startsWith('NOW:') || f.startsWith('HOP:')), 'no blacklist tags');
+    assert.ok(!host.suspects().some(r => r.username === 'fan'), 'off the suspect list');
+    assert.equal(host.flagged.has('fan'), false, 'the flag raised before whitelisting is dropped');
+    assert.equal(host.detail('fan').flagged, null);
+    // everything else still works: they are still tracked, and the other account is untouched
+    assert.equal(after.joins, 1);
+    assert.ok(host.suspects().some(r => r.username === 'user123456789'));
+
+    // a whitelisted account is not flagged again when it comes back
+    conn.emit(WebcastEvent.MEMBER, user('fan', { id: 'F1', followInfo: { followerCount: '0', followingCount: '0' } }));
+    assert.equal(host.flagged.has('fan'), false);
+
+    // taking them off the whitelist scores them again, from the record kept all along
+    host.lists.whitelist.delete('fan');
+    const back = host.row(host.tracker.get('fan'));
+    assert.equal(back.whitelisted, false);
+    assert.ok(back.score > 0);
+    assert.deepEqual(back.blacklisted, ['badguy']);
+    host.stop();
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('a whitelisted viewer\'s hops are recorded but never announced', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'rattrap-'));
+  try {
+    const cfg = cfgFor(dir);
+    const monitors = [];
+    const hostConn = new FakeConnection(), badConn = new FakeConnection([], 'r2');
+    const host = new Monitor('host', cfg, { createConnection: () => hostConn, peers: () => monitors });
+    const bad = new Monitor('badguy', cfg, { createConnection: () => badConn, peers: () => monitors });
+    monitors.push(host, bad);
+    const hops = [];
+    host.on('hop', h => hops.push(h));
+    host.lists.whitelist.add('fan');
+    host.start(); bad.start(); await tick();
+
+    hostConn.emit(WebcastEvent.MEMBER, user('fan', { id: 'F1' }));
+    host.peerJoined('badguy', 'fan');          // they walked into the blacklisted room
+    assert.equal(hops.length, 0, 'nothing announced for a whitelisted account');
+    assert.equal(host.tracker.get('fan').hops.length, 1, 'but the move is still recorded');
+    assert.ok(!host.logLines.some(l => l.kind === 'hop'));
+    // the row keeps the hop count without the accusing tags
+    const r = host.row(host.tracker.get('fan'));
+    assert.equal(r.hops, 1);
+    assert.ok(!r.flags.some(f => f.startsWith('HOP:')));
+    host.stop(); bad.stop();
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 

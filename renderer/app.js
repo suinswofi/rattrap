@@ -60,7 +60,7 @@ function notify(title, text, kind, ttl, target) {
 }
 
 const isMonitored = name => state.rooms.some(r => r.room === String(name).replace(/^@/, '').toLowerCase());
-const roomLists = room => state.config?.lists?.[room] ?? { watch: [], blacklist: [], pinned: [] };
+const roomLists = room => state.config?.lists?.[room] ?? { watch: [], blacklist: [], whitelist: [], pinned: [] };
 const isStarred = user => { const l = roomLists(state.current); return !!user && (l.pinned.includes(user) || l.watch.includes(user)); };
 
 /** Add a room from a blacklist prompt without leaving the room the user is looking at. */
@@ -70,7 +70,7 @@ async function addBlacklistedRoom(name) {
 }
 
 /** Which tab an account belongs on: blacklist hits first, then burners, else the plain list. */
-const tabFor = u => (u.blacklisted.length || u.hops) ? 'blacklist' : (u.burnerScore > 0 || u.pinned) ? 'burners' : 'users';
+const tabFor = u => u.whitelisted ? 'users' : (u.blacklisted.length || u.hops) ? 'blacklist' : (u.burnerScore > 0 || u.pinned) ? 'burners' : 'users';
 
 /** Show one account: switch room and tab, undo anything hiding it, scroll to it, flash it, open the drawer. */
 async function goToUser(room, user) {
@@ -120,8 +120,9 @@ function renderLists() {
   const chips = (list, name) => list.map(n => `<li><span class="name">@${esc(n)}</span>${tag(name, n)}<button class="x" data-list="${name}" data-name="${esc(n)}" title="remove">×</button></li>`).join('');
   $('#blacklist').innerHTML = chips(l.blacklist, 'blacklist') || (state.current ? '' : '<li class="sub">select a room</li>');
   $('#watchlist').innerHTML = chips(l.watch, 'watch') || (state.current ? '' : '<li class="sub">select a room</li>');
-  for (const id of ['#blacklist-room', '#watchlist-room']) $(id).textContent = state.current ? `· @${state.current}` : '';
-  for (const f of ['#add-blacklist', '#add-watch']) for (const el of $(f).elements) el.disabled = !state.current;
+  $('#whitelist').innerHTML = chips(l.whitelist ?? [], 'whitelist') || (state.current ? '' : '<li class="sub">select a room</li>');
+  for (const id of ['#blacklist-room', '#watchlist-room', '#whitelist-room']) $(id).textContent = state.current ? `· @${state.current}` : '';
+  for (const f of ['#add-blacklist', '#add-watch', '#add-whitelist']) for (const el of $(f).elements) el.disabled = !state.current;
 }
 
 // ---------- header ----------
@@ -150,8 +151,8 @@ function renderHeader() {
   for (const id of ['#btn-save', '#btn-reconnect', '#btn-remove']) $(id).disabled = !state.current;
   $('#count-users').textContent = s ? s.counts.seen : '';
   const users = s?.users ?? [];
-  const burners = users.filter(u => u.dismissedAt == null && u.score >= alertScore()).length;
-  const hits = users.filter(u => u.dismissedAt == null && (u.blacklisted.length || u.hops)).length;
+  const burners = users.filter(u => !u.whitelisted && u.dismissedAt == null && u.score >= alertScore()).length;
+  const hits = users.filter(u => !u.whitelisted && u.dismissedAt == null && (u.blacklisted.length || u.hops)).length;
   const cb = $('#count-burners'); cb.textContent = s ? burners : ''; cb.className = `count ${burners ? 'hot' : ''}`;
   const cl = $('#count-blacklist'); cl.textContent = s ? hits : ''; cl.className = `count ${hits ? 'hot' : ''}`;
   renderStreamSelect();
@@ -299,7 +300,8 @@ const FACETS = [
   { key: 'pinned', label: 'Pinned', test: u => u.pinned },
 ];
 const suspectMode = () => state.tab === 'blacklist' ? 'blacklist' : 'burners';
-const onTab = { burners: u => u.burnerScore > 0 || u.pinned, blacklist: u => u.blacklisted.length > 0 || u.hops > 0 };
+// Whitelisted accounts are trusted, so they are kept off both suspect tabs whatever else they do.
+const onTab = { burners: u => !u.whitelisted && (u.burnerScore > 0 || u.pinned), blacklist: u => !u.whitelisted && (u.blacklisted.length > 0 || u.hops > 0) };
 const passes = (u, filters, except = null) => [...filters].every(([k, v]) => k === except || FACETS.find(f => f.key === k).test(u) === (v === 'yes'));
 
 function suspectRows(mode = suspectMode()) {
@@ -342,6 +344,7 @@ function renderSuspects() {
       <div class="card-actions">
         <button class="pin ${u.pinned ? 'on' : ''}" data-action="pin" title="${u.pinned ? 'Unpin: this account can be dismissed again' : 'Pin: keep this account on the list and keep its full history forever'}">${u.pinned ? 'Pinned' : 'Pin'}</button>
         ${u.dismissedAt != null ? '<button data-action="restore" title="Put this account back on the list">Restore</button>' : `<button data-action="dismiss" title="Hide this account until it joins again" ${u.pinned ? 'disabled' : ''}>Dismiss</button>`}
+        <button data-action="whitelist" title="Whitelist: trust this account, so it is never scored or flagged in this room again">Whitelist</button>
       </div>
       <div class="stats">${plural(u.joins, 'join')} · ${plural(u.chats, 'chat')} · ${plural(u.likes, 'like')} · ${plural(u.gifts, 'gift')}${u.coins ? ` (${u.coins} coins)` : ''} · ${plural(u.shares, 'share')} · seen ${fmtTime(u.firstSeen)}–${fmtTime(u.lastSeen)} · ${plural(u.streamsSeen, 'stream')}${u.followers != null ? ` · ${num(u.followers)} followers` : ''}</div>
       <div class="reasons">${u.reasons.map(r => `<span class="reason ${reasonClass(r)}">${esc(r)}</span>`).join('') || '<span class="reason">nothing suspicious</span>'}</div>
@@ -373,6 +376,7 @@ $('#suspects-list').addEventListener('click', async e => {
   e.stopPropagation();
   const user = b.closest('[data-user]').dataset.user;
   if (b.dataset.action === 'pin') { const on = b.classList.contains('on'); await api.editList(state.current, 'pinned', on ? 'remove' : 'add', [user]); await loadConfig(); }
+  else if (b.dataset.action === 'whitelist') { await api.editList(state.current, 'whitelist', 'add', [user]); await loadConfig(); toast('Whitelisted', `@${user} is trusted: no score, no flags, and off these tabs until you remove them from the whitelist.`, 'ok'); }
   else if (b.dataset.action === 'dismiss') await api.dismiss(state.current, [user]);
   else if (b.dataset.action === 'restore') await api.undismiss(state.current, [user]);
   await refreshSnapshot();
@@ -512,11 +516,12 @@ async function renderDetail() {
   const kv = pairs => `<dl class="kv">${pairs.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v}</dd>`).join('')}</dl>`;
   const watched = roomLists(state.current).watch.includes(d.username);
   const pinned = roomLists(state.current).pinned?.includes(d.username);
-  const score = t ? `<div class="scorebox"><span class="score ${scoreClass(t.score)}">${t.score}</span><div class="reasons">${t.reasons.length ? t.reasons.map(r => `<span class="reason ${reasonClass(r)}">${esc(r)}</span>`).join('') : '<span class="none">nothing suspicious</span>'}</div></div>`
-    : '<p class="note">Not seen this stream, so no score. Showing history only.</p>';
+  const white = roomLists(state.current).whitelist?.includes(d.username);
+  const score = t ? `<div class="scorebox"><span class="score ${scoreClass(t.score)}">${t.score}</span><div class="reasons">${t.reasons.length ? t.reasons.map(r => `<span class="reason ${reasonClass(r)}">${esc(r)}</span>`).join('') : `<span class="none">${white ? 'whitelisted: not scored' : 'nothing suspicious'}</span>`}</div></div>`
+    : `<p class="note">Not seen this stream, so no score. Showing history only.${white ? ' This account is whitelisted.' : ''}</p>`;
   const parts = [
     score,
-    `<div class="actions"><button class="btn" id="d-watch">${watched ? 'Unwatch' : 'Watch'}</button><button class="btn" id="d-pin">${pinned ? 'Unpin' : 'Pin'}</button><button class="btn" id="d-open">Open on TikTok</button></div>`,
+    `<div class="actions"><button class="btn" id="d-watch">${watched ? 'Unwatch' : 'Watch'}</button><button class="btn" id="d-pin">${pinned ? 'Unpin' : 'Pin'}</button><button class="btn" id="d-white" title="${white ? 'Stop trusting this account: score and flag it like anyone else' : 'Trust this account: never score or flag it in this room again'}">${white ? 'Un-whitelist' : 'Whitelist'}</button><button class="btn" id="d-open">Open on TikTok</button></div>`,
     '<h4>Profile (as reported by TikTok)</h4>',
     kv([
       ['followers', num(p.followers)], ['following', num(p.following)],
@@ -566,6 +571,7 @@ async function renderDetail() {
   $('#detail-body').innerHTML = parts.join('');
   $('#d-watch').onclick = async () => { await api.editList(state.current, 'watch', watched ? 'remove' : 'add', [d.username]); await loadConfig(); renderDetail(); };
   $('#d-pin').onclick = async () => { await api.editList(state.current, 'pinned', pinned ? 'remove' : 'add', [d.username]); await loadConfig(); renderDetail(); scheduleRefresh(); };
+  $('#d-white').onclick = async () => { await api.editList(state.current, 'whitelist', white ? 'remove' : 'add', [d.username]); await loadConfig(); renderDetail(); scheduleRefresh(); };
   $('#d-open').onclick = () => api.openExternal(`https://www.tiktok.com/@${encodeURIComponent(d.username)}`);
   // A stream row shows only that stream in the timeline below; click it again for every stream.
   for (const row of document.querySelectorAll('#detail-body .streams tr[data-sid]')) row.onclick = () => {
@@ -649,7 +655,7 @@ api.onEvent(ev => {
       break;
     }
     case 'users': if (ev.room === state.current) scheduleRefresh(); break;
-    case 'lists': state.config = { ...state.config, lists: { ...(state.config?.lists ?? {}), [ev.room]: { watch: ev.watch, blacklist: ev.blacklist, pinned: ev.pinned ?? [] } } }; renderLists(); scheduleRefresh(); break;
+    case 'lists': state.config = { ...state.config, lists: { ...(state.config?.lists ?? {}), [ev.room]: { watch: ev.watch, blacklist: ev.blacklist, whitelist: ev.whitelist ?? [], pinned: ev.pinned ?? [] } } }; renderLists(); scheduleRefresh(); break;
     case 'update': onUpdate(ev); break;
     case 'saved': if (ev.room === state.current) notify(`@${ev.room} saved`, `${ev.count} users written to the stream snapshot and the room history`, 'ok', 4000); break;
   }
@@ -672,7 +678,8 @@ const HELP = {
 </ul>
 <p>A hit adds points to the burner score, fires an alert, and tags the viewer <code>↔ @name</code>, <code>in @name's stream</code> or <code>seen at @name</code> in the tables and the detail drawer.</p>
 <div class="example"><b>Example.</b> You monitor <code>@alice</code> and <code>@bob</code>. Add <code>@bob</code> to <code>@alice</code>'s blacklist. When someone sitting in <code>@bob</code>'s stream walks into <code>@alice</code>'s room, you get an alert in <code>@alice</code>'s room saying how long ago they were seen at <code>@bob</code>'s.</div>
-<p>Rat Trap never reads anyone's following list. It only learns follows from the blacklisted streamer's own room.</p>`,
+<p>Rat Trap never reads anyone's following list. It only learns follows from the blacklisted streamer's own room.</p>
+<p>A viewer on this room's <b>whitelist</b> is exempt from all of this, however much they overlap with a blacklisted streamer.</p>`,
   },
   watch: {
     title: 'Watch list: viewers you want to keep an eye on',
@@ -689,6 +696,23 @@ const HELP = {
 <p>Add someone by typing their username below, or with the <b>Watch</b> button in a viewer's detail drawer.</p>
 <div class="example"><b>Typical flow.</b> The Blacklist hits or Burners tab surfaces an account. Put it on the watch list, and from then on every move it makes in this room is announced and kept.</div>
 <p><b>Pinning</b> (Burners and Blacklist hits tabs) keeps an account on those lists when you press <b>Dismiss all</b>, shows it even with a score of 0, and keeps its full history like the watch list does, but without the toasts. Pin what you want to keep looking at; watch what you want to be told about.</p>`,
+  },
+  whitelist: {
+    title: 'Whitelist: viewers you trust',
+    body: `
+<p>The whitelist holds <b>specific viewer accounts</b>, like the watch list does — not streamers. It is the opposite of a blacklist hit: an account on it is <b>never flagged</b>.</p>
+<p>It belongs to <b>this room only</b>. Each room you monitor has its own whitelist.</p>
+<p>For a whitelisted viewer, Rat Trap collects no signals at all:</p>
+<ul>
+  <li>their burner score is <b>0</b> with no reasons, however new, empty or auto-named the account looks,</li>
+  <li>no <b>alert</b> is raised for them — not for a score, not for hopping to or from a blacklisted streamer's stream,</li>
+  <li>they never appear on the <b>Burners</b> or <b>Blacklist hits</b> tabs, and any flag already raised this stream is dropped the moment you whitelist them,</li>
+  <li>and they are tagged <code>white</code> in the tables.</li>
+</ul>
+<p>Everything else carries on as normal: they still show up on the <b>Users</b> tab, the <b>Log</b> and <b>Chat</b> tabs, and in the history, with their joins, chats and gifts counted. Whitelisting says "stop accusing this one", not "stop watching the room".</p>
+<p>Add someone by typing their username below, with the <b>Whitelist</b> button on a card on the Burners or Blacklist hits tabs, or with <b>Whitelist</b> in a viewer's detail drawer. Remove them with the <b>×</b> on the chip and they are scored like anyone else again, from their full record — nothing is thrown away while they are whitelisted.</p>
+<div class="example"><b>Typical flow.</b> A regular of yours keeps landing on the Burners tab because they follow nobody and never chat, or a friend of yours watches a blacklisted streamer too. Whitelist them once and they stop cluttering the suspect tabs for good.</div>
+<p><b>Dismiss</b> is the temporary version of this: it hides an account until it joins again. Whitelist what you are sure about; dismiss what you have just finished looking at.</p>`,
   },
   streams: {
     title: 'Streams and the log',
@@ -717,7 +741,7 @@ $('#add-room').addEventListener('submit', async e => {
   try { const r = await api.addRoom(name); input.value = ''; await refreshRooms(); await selectRoom(r.room); }
   catch (err) { toast('Could not add room', err.message, 'error'); }
 });
-for (const [form, list] of [['#add-blacklist', 'blacklist'], ['#add-watch', 'watch']]) {
+for (const [form, list] of [['#add-blacklist', 'blacklist'], ['#add-watch', 'watch'], ['#add-whitelist', 'whitelist']]) {
   $(form).addEventListener('submit', async e => {
     e.preventDefault(); const input = e.target.querySelector('input'); const name = input.value.trim(); if (!name || !state.current) return;
     try { await api.editList(state.current, list, 'add', [name]); input.value = ''; await loadConfig(); scheduleRefresh(); }
@@ -804,7 +828,7 @@ $('#btn-settings').addEventListener('click', async () => {
   await loadConfig();
   const f = $('#settings-form');
   for (const el of f.elements) { if (!el.name) continue; if (el.type === 'checkbox') el.checked = !!state.config[el.name]; else el.value = state.config[el.name] ?? ''; }
-  $('#settings-path').textContent = `Saved to ${state.config.configFile}. Rooms, blacklist, watch list and pins are saved as you edit them.`;
+  $('#settings-path').textContent = `Saved to ${state.config.configFile}. Rooms, blacklist, watch list, whitelist and pins are saved as you edit them.`;
   $('#settings').hidden = false;
 });
 $('#settings-cancel').addEventListener('click', () => { $('#settings').hidden = true; });

@@ -156,6 +156,7 @@ td .flag { display: inline-block; font-size: 10px; font-weight: 700; padding: 1p
 .flag.bl { background: var(--live); color: #fff; }
 .flag.renamed { background: var(--warn); color: #0e0e10; }
 .flag.watch { background: var(--purple); color: #fff; }
+.flag.white { background: rgba(0, 245, 147, .15); color: var(--ok); }
 .flag.follower, .flag.followed-live { background: var(--purple-dim); color: var(--purple-light); }
 .flag.mod { background: rgba(0, 245, 147, .15); color: var(--ok); }
 .score { display: inline-block; min-width: 26px; text-align: center; padding: 1px 6px; border-radius: 3px; font-weight: 700; font-variant-numeric: tabular-nums; background: var(--border); color: var(--muted); }

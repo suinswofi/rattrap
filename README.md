@@ -40,7 +40,9 @@ The header always says which stream the Users, Burners and Blacklist hits tabs a
 - **Rooms** (sidebar): every streamer being monitored, with a status dot (red = live, yellow =
   waiting for them to go live, purple = connecting) and the number of accounts seen this stream.
   Add a room with the box below the list. Rooms added here are remembered in `config.json`.
-- **Blacklist** and **Watch list** (sidebar): one pair per room, edited in place, saved immediately.
+- **Blacklist**, **Watch list** and **Whitelist** (sidebar): one set per room, edited in place,
+  saved immediately. The blacklist holds rival *streamers*; the watch list and whitelist hold
+  *viewers*.
 - **Users** tab: everyone seen this stream (only the rows in view are drawn, so large rooms stay
   quick). Click a column to sort, drag a header edge to resize it (double-click the edge to reset;
   widths are remembered), type to search. Click a row for the drawer.
@@ -58,7 +60,8 @@ The header always says which stream the Users, Burners and Blacklist hits tabs a
   auto-generated name, watched and pinned.
 - **Pin** keeps an account on the list whatever its score, protects it from **Dismiss all but
   pinned**, and keeps its full history forever (see below). **Dismiss** hides an account until it
-  joins again. Dismissals last for the stream; pins are remembered per room.
+  joins again. **Whitelist** trusts it for good (see below). Dismissals last for the stream; pins
+  and whitelist entries are remembered per room.
 - **Chat** and **Log** tabs: one stream at a time, chosen with the **Stream** drop-down (the live
   one by default). The whole log is kept; nothing rolls off. The newest 1,500 lines are drawn
   first and **Show earlier** adds more. Chips hide or show joins, chat, gifts, follows & shares,
@@ -71,7 +74,8 @@ The header always says which stream the Users, Burners and Blacklist hits tabs a
   watched accounts the timeline is everything ever logged about them, grouped by stream; for
   anyone else it is what this stream's log holds. Click a stream in that table to cut the timeline
   down to that one stream (click it again, or **show all**, for every stream); the **↗** beside a
-  stream's name opens the Chat tab on that stream instead. Buttons to watch, pin, or open on TikTok.
+  stream's name opens the Chat tab on that stream instead. Buttons to watch, pin, whitelist, or
+  open on TikTok.
 - **Toasts** pop up for hops, flagged joins, watched users, saves and errors. Click one to jump to
   the account.
 - **Settings**: alert score, autosave, live polling, log retention, history pruning, Euler Stream
@@ -132,6 +136,28 @@ puts them on the Blacklist hits tab if any apply:
 Blacklists are per room, so watching two streamers with different rivals keeps the alerts
 separate. Rat Trap never scrapes anyone's following list; a follow is only learned from the
 rival's own room. Other rooms' histories are re-read whenever any room saves.
+
+## Whitelisted viewers (accounts you trust)
+
+Each room also has a whitelist. It holds **viewers**, not streamers, and it is the off switch for
+everything above: a whitelisted account is never flagged, whatever it looks like or whoever it
+watches.
+
+- Its burner score is **0**, with no reasons — no signal is collected at all.
+- No alert is raised for it: not for a score, not for a hop to or from a blacklisted streamer's
+  stream. Any flag already raised this stream is dropped the moment you whitelist the account.
+- It never appears on the **Burners** or **Blacklist hits** tabs, and it is tagged `white` in the
+  tables.
+
+Everything else carries on: the account is still on the Users tab, still in the log, the chat and
+the room history, with its joins, chats and gifts counted, and hops it makes are still recorded —
+they are just not announced. Take it off the whitelist and it is scored like anyone else again,
+from the record kept all along.
+
+Add someone by typing their username in the sidebar, with **Whitelist** on a card on the Burners
+or Blacklist hits tabs, or with **Whitelist** in the detail drawer. Use it for your regulars, your
+mods and the friends who happen to watch a rival too; use **Dismiss** for accounts you have merely
+finished looking at this stream.
 
 ## Burner score
 
@@ -219,7 +245,7 @@ packaged (all keys optional; copy `config.example.json` to start). The app edits
 |----------------------|----------------------------|---------|
 | `rooms`              | `[]`                       | rooms the app opens on start; falls back to `username` |
 | `username`           | `the_great_sir_stromburg`  | room opened when `rooms` is empty |
-| `lists`              | `{}`                       | per room: `{ "<room>": { "watch": [...], "blacklist": [...], "pinned": [...] } }` |
+| `lists`              | `{}`                       | per room: `{ "<room>": { "watch": [...], "blacklist": [...], "whitelist": [...], "pinned": [...] } }` |
 | `burnerAlertScore`   | `6`                        | score at which a join is announced |
 | `signApiKey`         | `""`                       | optional Euler Stream API key for higher connect limits |
 | `dataDir`            | `data`                     | log, snapshot and history directory |

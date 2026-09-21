@@ -109,15 +109,20 @@ ipcMain.handle('room:save', (_e, name) => getMonitor(name).save());
 ipcMain.handle('room:dismiss', (_e, name, users) => getMonitor(name).dismiss(Array.isArray(users) ? users : [users]));
 ipcMain.handle('room:undismiss', (_e, name, users) => getMonitor(name).undismiss(Array.isArray(users) ? users : [users]));
 ipcMain.handle('list:edit', (_e, room, list, op, names) => {
-  if (!['watch', 'blacklist', 'pinned'].includes(list)) throw new Error('unknown list');
+  if (!['watch', 'blacklist', 'whitelist', 'pinned'].includes(list)) throw new Error('unknown list');
   const lists = roomLists(cfg, room);
   const set = lists[list];
   const clean = nameSet(Array.isArray(names) ? names : String(names).split(/[\s,]+/));
   for (const n of clean) op === 'remove' ? set.delete(n) : set.add(n);
   saveConfig();
+  const m = monitors.get(normalizeUsername(room));
   // A newly pinned or watched account gets its whole logged past copied into the history.
-  if (op !== 'remove' && list !== 'blacklist') monitors.get(normalizeUsername(room))?.retainEvents([...clean]);
-  send({ type: 'lists', room: normalizeUsername(room), watch: [...lists.watch], blacklist: [...lists.blacklist], pinned: [...lists.pinned] });
+  if (op !== 'remove') {
+    if (list === 'watch' || list === 'pinned') m?.retainEvents([...clean]);
+    // Whitelisting drops any flag already raised this stream, so the account leaves the suspect tabs at once.
+    if (list === 'whitelist') m?.unflag([...clean]);
+  }
+  send({ type: 'lists', room: normalizeUsername(room), watch: [...lists.watch], blacklist: [...lists.blacklist], whitelist: [...lists.whitelist], pinned: [...lists.pinned] });
   return [...set];
 });
 ipcMain.handle('open:data', () => shell.openPath(cfg.dataDir));

@@ -30,7 +30,7 @@ import { scoreUser, hopText } from './burner.js';
 export const DEFAULTS = {
   username: 'the_great_sir_stromburg',
   rooms: [],                 // rooms opened on start (falls back to `username`)
-  lists: {},                 // per room: { "<room>": { watch: [...], blacklist: [...], pinned: [...] } }
+  lists: {},                 // per room: { "<room>": { watch: [...], blacklist: [...], whitelist: [...], pinned: [...] } }
   burnerAlertScore: 6,
   signApiKey: '',
   dataDir: 'data',
@@ -67,7 +67,7 @@ export function normalizeConfig(cfg, baseDir) {
   const lists = {};
   for (const [room, l] of Object.entries(cfg.lists ?? {})) {
     const r = normalizeUsername(room); if (!r) continue;
-    lists[r] = { watch: nameSet(l?.watch), blacklist: nameSet(l?.blacklist), pinned: nameSet(l?.pinned) };
+    lists[r] = { watch: nameSet(l?.watch), blacklist: nameSet(l?.blacklist), whitelist: nameSet(l?.whitelist), pinned: nameSet(l?.pinned) };
   }
   cfg.lists = lists;
   cfg.burnerAlertScore = Number(cfg.burnerAlertScore);
@@ -84,18 +84,19 @@ export function normalizeConfig(cfg, baseDir) {
   return cfg;
 }
 
-/** The watch/blacklist for one room, created (from the legacy global lists) on first use. */
+/** The watch/black/whitelist for one room, created (from the legacy global lists) on first use. */
 export function roomLists(cfg, room) {
   const r = normalizeUsername(room);
-  if (!cfg.lists[r]) cfg.lists[r] = { watch: new Set(cfg.legacyLists?.watch ?? []), blacklist: new Set(cfg.legacyLists?.blacklist ?? []), pinned: new Set() };
-  if (!cfg.lists[r].pinned) cfg.lists[r].pinned = new Set();
+  if (!cfg.lists[r]) cfg.lists[r] = { watch: new Set(cfg.legacyLists?.watch ?? []), blacklist: new Set(cfg.legacyLists?.blacklist ?? []), whitelist: new Set(), pinned: new Set() };
+  // lists added after a config was written are missing from it
+  for (const k of ['whitelist', 'pinned']) if (!cfg.lists[r][k]) cfg.lists[r][k] = new Set();
   return cfg.lists[r];
 }
 
 /** Plain-JSON view of a config (Sets become arrays) for saving or sending to a renderer. */
 export function configToJSON(cfg) {
   const { legacyLists, ...rest } = cfg;
-  return { ...rest, lists: Object.fromEntries(Object.entries(cfg.lists).map(([r, l]) => [r, { watch: [...l.watch], blacklist: [...l.blacklist], pinned: [...(l.pinned ?? [])] }])) };
+  return { ...rest, lists: Object.fromEntries(Object.entries(cfg.lists).map(([r, l]) => [r, { watch: [...l.watch], blacklist: [...l.blacklist], whitelist: [...(l.whitelist ?? [])], pinned: [...(l.pinned ?? [])] }])) };
 }
 
 /**
@@ -127,7 +128,7 @@ export class Monitor extends EventEmitter {
     this.username = normalizeUsername(username);
     if (!this.username) throw new Error('no username given');
     this.cfg = cfg;
-    this.lists = roomLists(cfg, this.username); // this room's own watch list, blacklist and pins
+    this.lists = roomLists(cfg, this.username); // this room's own watch list, blacklist, whitelist and pins
     this.createConnection = opts.createConnection ?? ((u, o) => new TikTokLiveConnection(u, o));
     this.peers = opts.peers ?? (() => []);
     this.tracker = new ViewerTracker({ chatHistory: cfg.chatHistory });
@@ -472,7 +473,7 @@ export class Monitor extends EventEmitter {
   }
 
   _maybeFlag(u) {
-    if (this.flagged.has(u.username)) return;
+    if (this.flagged.has(u.username) || this.whitelisted(u.username)) return;
     const a = this.assess(u);
     if (!a.blacklisted.length && a.score < this.cfg.burnerAlertScore) return;
     const flag = { t: Date.now(), user: u.username, nickname: u.nickname, ...a };
@@ -502,6 +503,9 @@ export class Monitor extends EventEmitter {
 
   _hop(u, dir, room, gapMs, t) {
     if (!this.tracker.hop(u.username, dir, room, gapMs, t)) return; // same move announced under a minute ago
+    // A whitelisted account's moves are still recorded, so the record is complete if it ever comes
+    // off the whitelist, but nothing is announced or flagged.
+    if (this.whitelisted(u.username)) { this._changed(); return; }
     const hop = u.hops[u.hops.length - 1];
     const a = this.assess(u);
     const text = hopText(hop);
@@ -515,6 +519,8 @@ export class Monitor extends EventEmitter {
   // ---------- queries ----------
   watched(username) { return this.lists.watch.has(username.toLowerCase()); }
   pinned(username) { return this.lists.pinned.has(username.toLowerCase()); }
+  /** Trusted account: scored at 0, never flagged, never on the Burners or Blacklist hits tabs. */
+  whitelisted(username) { return this.lists.whitelist.has(username.toLowerCase()); }
 
   /** Hide accounts from the suspect lists (until they join again). Pinned accounts are never dismissed. */
   dismiss(usernames, now = Date.now()) {
@@ -533,6 +539,14 @@ export class Monitor extends EventEmitter {
     if (n) this._changed();
     return n;
   }
+  /** Forget this stream's flags for these accounts, e.g. because they have just been whitelisted. */
+  unflag(usernames) {
+    let n = 0;
+    for (const name of usernames) if (this.flagged.delete(normalizeUsername(name))) n++;
+    if (n) this._changed();
+    return n;
+  }
+
   /** Seen in the stream that is live right now. */
   seenLive(username) { return this.room.live && this.tracker.users.has(username); }
 
@@ -544,7 +558,8 @@ export class Monitor extends EventEmitter {
   liveIn(username) { return this._peers(true).filter(p => p.seenLive(username)).map(p => p.username); }
 
   assess(u, h = this.history.summary(u)) {
-    return scoreUser(u, { history: h, rooms: this.roomIndex.lookup(u), liveIn: this.liveIn(u.username), blacklist: this.lists.blacklist, sid: this.stream?.sid ?? null });
+    return scoreUser(u, { history: h, rooms: this.roomIndex.lookup(u), liveIn: this.liveIn(u.username), blacklist: this.lists.blacklist,
+      whitelisted: this.whitelisted(u.username), sid: this.stream?.sid ?? null });
   }
 
   refreshRoomIndex() { this.roomIndex = loadRoomIndex(this.cfg.dataDir, this.username); return this.roomIndex; }
@@ -590,9 +605,11 @@ export class Monitor extends EventEmitter {
     const a = this.assess(u, h);
     const live = this.liveIn(u.username);
     const hopped = [...new Set(u.hops.map(x => x.room))];
+    // A whitelisted account keeps the descriptive tags but not the blacklist ones: those are the accusation.
+    const blacklistFlags = a.whitelisted ? [] : [...hopped.map(r => `HOP:@${r}`), ...live.filter(r => !hopped.includes(r)).map(r => `NOW:@${r}`),
+      ...a.blacklisted.filter(r => !live.includes(r) && !hopped.includes(r)).map(r => `BL:@${r}`)];
     const flags = [u.isAdmin && 'mod', u.isFollower && 'follower', u.followed && 'followed-live', h?.aliases?.length && 'renamed',
-      ...hopped.map(r => `HOP:@${r}`), ...live.filter(r => !hopped.includes(r)).map(r => `NOW:@${r}`),
-      ...a.blacklisted.filter(r => !live.includes(r) && !hopped.includes(r)).map(r => `BL:@${r}`), this.watched(u.username) && 'watch'].filter(Boolean);
+      ...blacklistFlags, this.watched(u.username) && 'watch', a.whitelisted && 'white'].filter(Boolean);
     return {
       username: u.username, nickname: u.nickname, userId: u.userId,
       joins: u.joins, chats: u.chats, likes: u.likes, gifts: u.gifts, coins: u.coins, shares: u.shares,
@@ -604,7 +621,7 @@ export class Monitor extends EventEmitter {
       verified: u.verified, privateAccount: u.privateAccount, gifterLevel: u.gifterLevel,
       isFollower: u.isFollower, isAdmin: u.isAdmin, followed: u.followed,
       score: a.score, blacklistScore: a.blacklistScore, burnerScore: a.score - a.blacklistScore, reasons: a.reasons, blacklisted: a.blacklisted, flags,
-      aliases: h?.aliases ?? [], watched: this.watched(u.username),
+      aliases: h?.aliases ?? [], watched: this.watched(u.username), whitelisted: a.whitelisted,
       pinned: this.pinned(u.username), dismissedAt: u.dismissedAt,
     };
   }
@@ -657,9 +674,9 @@ export class Monitor extends EventEmitter {
     return rooms.sort((a, b) => (b.liveNow - a.liveNow) || (b.blacklisted - a.blacklisted));
   }
 
-  /** Pinned accounts and everyone with a score, minus dismissed ones; pinned first, then by score. */
+  /** Pinned accounts and everyone with a score, minus dismissed and whitelisted ones; pinned first, then by score. */
   suspects(n = 20, includeDismissed = false) {
-    return this.rows().filter(r => (r.score > 0 || r.pinned) && (includeDismissed || r.dismissedAt === null))
+    return this.rows().filter(r => !r.whitelisted && (r.score > 0 || r.pinned) && (includeDismissed || r.dismissedAt === null))
       .sort((a, b) => (b.pinned - a.pinned) || (b.score - a.score)).slice(0, n);
   }
   find(q) { return this.tracker.find(q).map(u => this.row(u)); }
