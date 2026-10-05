@@ -114,6 +114,9 @@ export function streamStart(info, now = Date.now()) {
 }
 
 const DAY_MS = 24 * 60 * 60_000;
+const LIVE_STATUSES = new Set([2, 3]); // TikTok room status: 2 live, 3 paused (4 ended, anything else is not on air)
+const STREAM_ENDED = 3;                // ControlAction: the stream is over for good (4 = suspended, which can resume)
+const SILENCE_MS = 5 * 60_000;         // nothing heard for this long while "live": ask TikTok whether it really is
 
 export class Monitor extends EventEmitter {
   /**
@@ -147,6 +150,12 @@ export class Monitor extends EventEmitter {
     this.reconnectTimer = null;
     this.reconnectDelay = 10_000;
     this.timers = [];
+    this.attempt = 0;                 // bumped to abandon whatever connect or live check is in flight
+    this.connecting = false;          // conn.connect() is running
+    this.closing = false;             // we are disconnecting on purpose; ignore the DISCONNECTED event
+    this.endedWhileConnecting = false;
+    this.endedRooms = new Set();      // room ids whose stream TikTok said is over; never treated as live again
+    this.lastEventAt = 0;
   }
 
   // ---------- files ----------
@@ -172,6 +181,7 @@ export class Monitor extends EventEmitter {
     this.conn = this.createConnection(this.username, { ...(this.cfg.signApiKey ? { signApiKey: this.cfg.signApiKey } : {}), processInitialData: true });
     this._bind(this.conn);
     if (this.cfg.autosaveMinutes > 0) this.timers.push(setInterval(() => { try { this.save(); } catch (e) { this._log('error', `autosave failed: ${e.message}`); } }, this.cfg.autosaveMinutes * 60_000));
+    this.timers.push(setInterval(() => this._checkSilence(), 60_000));
     for (const t of this.timers) t.unref?.();
     this._connect();
     return this;
@@ -181,35 +191,69 @@ export class Monitor extends EventEmitter {
   stop() {
     if (this.quitting) return;
     this.quitting = true;
-    clearTimeout(this.reconnectTimer); this.reconnectTimer = null;
+    this._abandonConnect();
     for (const t of this.timers) clearInterval(t);
     this.timers = [];
     try { if (this.tracker.users.size) this.save(); } catch (e) { this._log('error', `save failed: ${e.message}`); }
-    try { this.conn?.disconnect(); } catch { /* ignore */ }
+    this._disconnect();
     this.room.live = false; this.room.streamStartedAt = null;
     this._setState('stopped', 'stopped');
   }
 
-  reconnect() {
-    try { this.conn?.disconnect(); } catch { /* ignore */ }
+  async reconnect() {
+    if (this.quitting || this.connecting) return; // a connect is already under way
+    this._abandonConnect();
+    const attempt = this.attempt;
+    await this._disconnect();
+    if (this.quitting || attempt !== this.attempt) return;
     this.reconnectDelay = 10_000;
-    setTimeout(() => this._connect(), 1000).unref?.();
+    this._connect();
+  }
+
+  /** Cancel any pending retry or live check, so only one connect attempt is ever in flight. */
+  _abandonConnect() {
+    this.attempt++;
+    clearTimeout(this.reconnectTimer); this.reconnectTimer = null;
+    this.liveCheck?.abort(); this.liveCheck = null;
+  }
+
+  /** Disconnect on purpose, without the DISCONNECTED event scheduling a reconnect. */
+  async _disconnect() {
+    this.closing = true;
+    try { await this.conn?.disconnect(); } catch { /* ignore */ } finally { this.closing = false; }
   }
 
   async _connect() {
-    if (this.quitting) return;
-    clearTimeout(this.reconnectTimer); this.reconnectTimer = null;
+    if (this.quitting || this.connecting) return;
+    this._abandonConnect();
+    const attempt = this.attempt;
+    const abandoned = () => this.quitting || attempt !== this.attempt;
     try {
       this._setState('connecting', 'connecting…');
       this.backlog = true; // the library replays the initial batch before connect() resolves
+      this.endedWhileConnecting = false;
       let state;
       // Events replayed during connect() belong to the stream we are about to identify; hold them until then.
       this._pending = [];
-      try { state = await this.conn.connect(); } finally { this.backlog = false; }
+      this.connecting = true;
+      try { state = await this.conn.connect(); } finally { this.backlog = false; this.connecting = false; }
+      if (abandoned()) { this._pending = null; return this._disconnect(); }
       this.reconnectDelay = 10_000;
       const now = Date.now();
-      this.room.id = state?.roomId ?? null; this.room.live = true; this.room.connectedAt = now;
+      const roomId = state?.roomId ?? null;
       const info = state?.roomInfo?.data ?? state?.roomInfo ?? {};
+      const dead = this._deadRoom(roomId, info);
+      if (dead) {
+        // Connected, but not to a live stream (TikTok can hand out an ended room for a while). Reopening it
+        // would resume the old stream with its old start time and show it as live until someone notices.
+        this._pending = null;
+        await this._disconnect();
+        if (abandoned()) return;
+        this.room.live = false; this.room.streamStartedAt = null;
+        return this._retryLater(`not live (${dead})`);
+      }
+      this.room.id = roomId; this.room.live = true; this.room.connectedAt = now;
+      this.lastEventAt = now;
       this.room.title = info.title ?? null;
       this._beginStream(this.room.id, info, now);
       if (info.user_count) this.room.viewers = Number(info.user_count);
@@ -219,15 +263,17 @@ export class Monitor extends EventEmitter {
       try { for (const fn of pending) fn(); } finally { this.backlog = false; }
     } catch (err) {
       this._pending = null;
+      if (abandoned()) return;
       this.room.live = false;
-      if (this.quitting) return;
       if (err instanceof UserOfflineError || /offline|not.*live/i.test(err?.message ?? '')) {
         this.room.streamStartedAt = null;
         if (!this.cfg.reconnectWhenLive) { this._setState('offline', 'not live'); return; }
         this._setState('waiting', `not live, checking every ${this.cfg.livePollSeconds}s`);
-        try { await this.conn.waitUntilLive(this.cfg.livePollSeconds); }
-        catch (e) { this._log('error', `live check failed: ${e.message}`); return this._scheduleReconnect(); }
-        if (this.quitting) return;
+        const check = this.liveCheck = new AbortController();
+        try { await this.conn.waitUntilLive(this.cfg.livePollSeconds, check.signal); }
+        catch (e) { if (abandoned()) return; this._log('error', `live check failed: ${e.message}`); return this._scheduleReconnect(); }
+        finally { if (this.liveCheck === check) this.liveCheck = null; }
+        if (abandoned()) return;
         this._log('system', 'went live!');
         return this._connect();
       }
@@ -235,6 +281,61 @@ export class Monitor extends EventEmitter {
       this._log('error', `connect failed: ${err.message}`);
       this._scheduleReconnect();
     }
+  }
+
+  /** Why the room we just connected to is not a live stream, or null if it is. */
+  _deadRoom(roomId, info) {
+    if (this.endedWhileConnecting) {
+      if (roomId) this.endedRooms.add(String(roomId));
+      return 'its stream has ended';
+    }
+    if (roomId && this.endedRooms.has(String(roomId))) return 'TikTok still hands out the room of the stream that ended';
+    if (info?.status != null && !LIVE_STATUSES.has(Number(info.status))) return `TikTok reports room status ${info.status}`;
+    return null;
+  }
+
+  /** Not live right now: wait one poll interval, then try again (connect() waits for the stream if still offline). */
+  _retryLater(message) {
+    this._abandonConnect();
+    if (this.quitting) return;
+    if (!this.cfg.reconnectWhenLive) return this._setState('offline', message);
+    this._setState('waiting', `${message}, checking again in ${this.cfg.livePollSeconds}s`);
+    this.reconnectTimer = setTimeout(() => { this.reconnectTimer = null; this._connect(); }, this.cfg.livePollSeconds * 1000);
+    this.reconnectTimer.unref?.();
+  }
+
+  /** The stream is over: close it in the history and wait for the next one. */
+  _streamEnded(message) {
+    this.room.live = false; this.room.streamStartedAt = null;
+    if (this.stream && !this.stream.endedAt) { this.stream.endedAt = Date.now(); this.history.touchStream(this.stream); }
+    try { this.save(); } catch (e) { this._log('error', `save failed: ${e.message}`); }
+    this._changed();
+    this._retryLater(message);
+  }
+
+  /** Nothing heard for a while: make sure the streamer is really still live, so a dead connection can't look live forever. */
+  async _checkSilence() {
+    if (this.state !== 'live' || this.checkingSilence || !this.conn?.fetchIsLive || Date.now() - this.lastEventAt < SILENCE_MS) return;
+    this.checkingSilence = true;
+    const attempt = this.attempt;
+    const mins = Math.round((Date.now() - this.lastEventAt) / 60_000);
+    try {
+      const live = await this.conn.fetchIsLive();
+      if (this.quitting || attempt !== this.attempt || this.state !== 'live') return;
+      if (live) {
+        this._log('status', `nothing heard for ${mins}m, reconnecting`);
+        this.reconnect();
+      } else {
+        this._log('status', `nothing heard for ${mins}m and @${this.username} is not live`);
+        if (this.room.id) this.endedRooms.add(String(this.room.id));
+        await this._disconnect();
+        if (this.quitting || attempt !== this.attempt) return;
+        this._streamEnded('stream ended');
+      }
+    } catch (e) {
+      this._log('error', `live check failed: ${e.message}`);
+      this.lastEventAt = Date.now(); // try again after another quiet spell
+    } finally { this.checkingSilence = false; }
   }
 
   _scheduleReconnect() {
@@ -336,7 +437,7 @@ export class Monitor extends EventEmitter {
 
   /** Wrap an event handler so events replayed during connect() wait until the stream is identified. */
   _on(conn, ev, fn) {
-    conn.on(ev, d => { if (this._pending) this._pending.push(() => fn(d)); else fn(d); });
+    conn.on(ev, d => { this.lastEventAt = Date.now(); if (this._pending) this._pending.push(() => fn(d)); else fn(d); });
   }
 
   _bind(conn) {
@@ -403,16 +504,15 @@ export class Monitor extends EventEmitter {
       const t = this.eventTime(d);
       for (const r of d.ranks ?? []) { const w = who(r); if (w) this.tracker.activity(w.username, w.info, null, {}, t); }
     });
-    conn.on(WebcastEvent.STREAM_END, () => {
-      this.room.live = false; this.room.streamStartedAt = null;
-      if (this.stream) { this.stream.endedAt = Date.now(); this.history.touchStream(this.stream); }
-      try { this.save(); } catch (e) { this._log('error', `save failed: ${e.message}`); }
-      this._setState('waiting', 'stream ended');
-      this._changed();
-      if (!this.quitting && this.cfg.reconnectWhenLive) this._scheduleReconnect();
+    conn.on(WebcastEvent.STREAM_END, ({ action } = {}) => {
+      if (this.quitting) return;
+      // In the batch replayed while connecting: the room we are connecting to is already over; _connect() handles it.
+      if (this.connecting) { this.endedWhileConnecting = true; return; }
+      if (action === STREAM_ENDED && this.room.id) this.endedRooms.add(String(this.room.id));
+      this._streamEnded(action === STREAM_ENDED || action == null ? 'stream ended' : 'stream suspended');
     });
     conn.on(ControlEvent.DISCONNECTED, ({ code, reason } = {}) => {
-      if (this.quitting) return;
+      if (this.quitting || this.closing || this.state === 'waiting' || this.state === 'offline') return;
       this.room.live = false;
       this._log('status', `disconnected${code ? ` (${code}${reason ? `: ${reason}` : ''})` : ''}`);
       this._scheduleReconnect();

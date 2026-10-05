@@ -4,7 +4,7 @@ import { EventEmitter } from 'node:events';
 import { mkdtempSync, rmSync, existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { WebcastEvent, ControlEvent } from 'tiktok-live-connector';
+import { WebcastEvent, ControlEvent, UserOfflineError } from 'tiktok-live-connector';
 import { Monitor, DEFAULTS, normalizeConfig, configToJSON, roomLists, who } from './monitor.js';
 import { makeSid, streamLabel } from './history.js';
 
@@ -629,4 +629,109 @@ test('streamStart() parses seconds and ms and rejects implausible values', async
   assert.equal(streamStart({ create_time: now / 1000 + 60 }, now), null, 'future');
   assert.equal(streamStart({ create_time: 1_600_000_000 }, now), null, 'years ago = account age, not stream');
   assert.equal(streamStart({}, now), null);
+});
+
+test('a stream end in the batch replayed while connecting is not shown as live', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'rattrap-'));
+  try {
+    // connecting just after the stream ended: TikTok's initial batch carries the "stream ended" message
+    const conn = new FakeConnection([[WebcastEvent.MEMBER, user('alice')], [WebcastEvent.STREAM_END, { action: 3 }]], 'r1');
+    const m = new Monitor('host', cfgFor(dir), { createConnection: () => conn });
+    m.start(); await tick();
+    assert.equal(m.state, 'waiting');
+    assert.equal(m.room.live, false);
+    assert.equal(m.snapshot().uptime, 0);
+    assert.equal(conn.connected, false, 'the connection to the ended room is closed');
+    assert.equal(m.stream, null, 'the ended stream is not opened');
+    assert.ok(m.reconnectTimer, 'checks again later');
+    m.stop();
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('reconnecting to the room of an ended stream does not resume it as live (no 24h+ uptime)', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'rattrap-'));
+  try {
+    const startedSec = Math.floor(Date.now() / 1000) - 25 * 3600;
+    let status = 2;
+    class Conn extends FakeConnection {
+      async connect() { this.connected = true; return { roomId: 'r1', roomInfo: { data: { title: 't', create_time: startedSec, status } } }; }
+    }
+    const conn = new Conn();
+    const m = new Monitor('host', cfgFor(dir), { createConnection: () => conn });
+    m.start(); await tick();
+    assert.equal(m.state, 'live');
+    const sid = m.stream.sid;
+    conn.emit(WebcastEvent.STREAM_END, { action: 3 });
+    assert.equal(m.state, 'waiting');
+    assert.ok(m.stream.endedAt > 0);
+
+    // TikTok still hands out the ended room, even claiming it is live
+    await m._connect();
+    assert.equal(m.state, 'waiting');
+    assert.equal(m.room.live, false);
+    assert.equal(m.snapshot().uptime, 0, 'the old stream\'s start time is not counted as uptime');
+    assert.ok(m.stream.endedAt > 0, 'the ended stream stays ended');
+    assert.equal(m.stream.sid, sid);
+    m.stop();
+
+    // after a restart (the ended room is not remembered): a room TikTok reports as not live is refused too
+    status = 0;
+    const m2 = new Monitor('host', cfgFor(dir), { createConnection: () => new Conn() });
+    m2.start(); await tick();
+    assert.equal(m2.state, 'waiting');
+    assert.equal(m2.room.live, false);
+    assert.equal(m2.snapshot().uptime, 0);
+    assert.ok(m2.stream.endedAt > 0, 'the resumed last stream stays ended');
+    m2.stop();
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('a connection that goes quiet is checked, and ended if the streamer is not live', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'rattrap-'));
+  try {
+    let live = false;
+    class Conn extends FakeConnection { async fetchIsLive() { return live; } }
+    const conn = new Conn();
+    const m = new Monitor('host', cfgFor(dir), { createConnection: () => conn });
+    m.start(); await tick();
+    assert.equal(m.state, 'live');
+
+    await m._checkSilence();
+    assert.equal(m.state, 'live', 'not checked before it has been quiet for a while');
+
+    m.lastEventAt = Date.now() - 6 * 60_000;
+    await m._checkSilence();
+    assert.equal(m.state, 'waiting');
+    assert.equal(m.room.live, false);
+    assert.ok(m.stream.endedAt > 0);
+    assert.equal(conn.connected, false);
+
+    // the streamer is live again, but TikTok still hands out the room that went quiet: not reopened
+    live = true;
+    await m._connect();
+    assert.equal(m.state, 'waiting', 'the ended room is not reopened');
+    m.stop();
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('reconnecting while waiting for the stream cancels the live check, so only one connect runs', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'rattrap-'));
+  try {
+    let offline = true, connects = 0, signal = null;
+    class Conn extends FakeConnection {
+      async connect() { connects++; if (offline) throw new UserOfflineError('The requested user isn\'t online :('); return super.connect(); }
+      waitUntilLive(_s, sig) { signal = sig; return new Promise((_, reject) => sig.addEventListener('abort', () => reject(new Error('aborted')))); }
+    }
+    const conn = new Conn();
+    const m = new Monitor('host', cfgFor(dir), { createConnection: () => conn });
+    m.start(); await tick();
+    assert.equal(m.state, 'waiting');
+    offline = false;
+    await m.reconnect(); await tick();
+    assert.ok(signal.aborted, 'the pending live check is cancelled');
+    assert.equal(m.state, 'live');
+    assert.equal(connects, 2);
+    assert.ok(!m.logLines.some(l => l.kind === 'error'), 'no "Already connected" or live-check errors');
+    m.stop();
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });
