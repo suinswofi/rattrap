@@ -18,7 +18,7 @@ export class ViewerTracker {
     return {
         username, nickname: null, userId: null,
         firstSeen: now, lastSeen: now,
-        joins: 0, lastJoin: null,
+        joins: 0, firstJoin: null, lastJoin: null, // join times; null = no join event seen (TikTok does not always send one)
         chats: 0, likes: 0, gifts: 0, coins: 0, shares: 0, followed: false,
         isAdmin: false, isFollower: null,
         hops: [], // moves between this room and a blacklisted streamer's stream: { t, dir: 'from' | 'to', room, gapMs }
@@ -50,6 +50,7 @@ export class ViewerTracker {
     const u = this._get(username, info, now);
     if (u.dismissedAt !== null && now >= u.dismissedAt) u.dismissedAt = null; // back in the room: worth a fresh look
     u.joins++;
+    if (u.firstJoin === null || now < u.firstJoin) u.firstJoin = now;
     u.lastJoin = now;
     this._touch(u, now);
     return u;
@@ -113,9 +114,14 @@ export class ViewerTracker {
       for (const f of ['uniqueId', 'present', 'firstLeft', 'lastLeft', 'leftHow', 'presentMs', 'sessionStart']) delete rec[f];
       // Snapshots from older versions hold `false` here when TikTok simply left the field out; that is unknown, not "no".
       for (const f of ['privateAccount', 'verified']) if (rec[f] === false) rec[f] = null;
+      // Older snapshots have no firstJoin. With a single join it is the last join; with more, firstSeen is the
+      // closest we have (a join is normally the first event of an account).
+      if (rec.firstJoin == null) rec.firstJoin = rec.joins === 1 ? rec.lastJoin ?? rec.firstSeen : rec.joins > 1 ? rec.firstSeen : null;
       if (existing) {
         rec.firstSeen = Math.min(existing.firstSeen, r.firstSeen ?? existing.firstSeen);
         rec.lastSeen = Math.max(existing.lastSeen, r.lastSeen ?? 0);
+        const joins = [existing.firstJoin, rec.firstJoin].filter(t => t != null);
+        rec.firstJoin = joins.length ? Math.min(...joins) : null;
       }
       this.users.set(id, rec);
     }

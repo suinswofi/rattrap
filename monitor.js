@@ -713,7 +713,7 @@ export class Monitor extends EventEmitter {
     return {
       username: u.username, nickname: u.nickname, userId: u.userId,
       joins: u.joins, chats: u.chats, likes: u.likes, gifts: u.gifts, coins: u.coins, shares: u.shares,
-      firstSeen: u.firstSeen, lastSeen: u.lastSeen, lastJoin: u.lastJoin,
+      firstSeen: u.firstSeen, lastSeen: u.lastSeen, firstJoin: u.firstJoin, lastJoin: u.lastJoin,
       hops: u.hops.length, lastHop: u.hops[u.hops.length - 1] ?? null,
       streamsSeen: (h?.streams ?? []).filter(s => s.sid !== this.stream?.sid).length + 1, daysSeen: h?.daysSeen ?? 1,
       firstSeenEver: h?.firstSeenEver ?? u.firstSeen, lastSeenEver: h?.lastSeenEver ?? u.lastSeen,

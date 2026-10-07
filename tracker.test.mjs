@@ -24,8 +24,34 @@ test('repeated joins are counted', () => {
   t.join('bob', {}, 7 * MIN);
   const b = t.get('@bob');
   assert.equal(b.joins, 2);
+  assert.equal(b.firstJoin, 0);
   assert.equal(b.lastJoin, 7 * MIN);
   assert.equal(b.likes, 5);
+});
+
+test('first join is the earliest join; activity alone sets none', () => {
+  const t = new ViewerTracker();
+  t.activity('c', null, 'chat', { text: 'hi' }, MIN);
+  assert.equal(t.get('c').firstJoin, null);
+  t.join('c', {}, 3 * MIN);
+  t.join('c', {}, 9 * MIN);
+  assert.equal(t.get('c').firstJoin, 3 * MIN);
+  assert.equal(t.get('c').firstSeen, MIN);
+});
+
+test('loading keeps the earliest first join and fills it in for older snapshots', () => {
+  const t = new ViewerTracker();
+  t.join('g', {}, 500);
+  t.load({ users: [
+    { username: 'g', firstSeen: 100, lastSeen: 600, joins: 2, firstJoin: 200, lastJoin: 600 },
+    { username: 'one', firstSeen: 100, lastSeen: 900, joins: 1, lastJoin: 300 }, // as written by 1.3.x
+    { username: 'many', firstSeen: 100, lastSeen: 900, joins: 3, lastJoin: 800 },
+    { username: 'none', firstSeen: 100, lastSeen: 900, joins: 0, lastJoin: null },
+  ] });
+  assert.equal(t.get('g').firstJoin, 200);
+  assert.equal(t.get('one').firstJoin, 300);
+  assert.equal(t.get('many').firstJoin, 100);
+  assert.equal(t.get('none').firstJoin, null);
 });
 
 test('gift coins, follow flag, top()', () => {

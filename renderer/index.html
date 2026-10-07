@@ -81,6 +81,11 @@
         <div id="suspect-tools" class="toolbar">
           <div id="suspect-filters" class="chipbar" title="Click a filter once to keep only accounts that have it, twice to keep only accounts that do not, a third time to switch it off. Filters combine: every selected filter must hold."></div>
           <div class="toolbar-right">
+            <label class="stream-pick" title="Order of the cards. Pinned accounts stay on top and dismissed ones at the bottom whatever the order. Accounts with no join event seen this stream go after the rest when sorting by join time."><span>Sort</span><select id="suspect-sort">
+              <option value="rank">Rank</option>
+              <option value="joinAsc">First join, oldest first</option>
+              <option value="joinDesc">First join, newest first</option>
+            </select></label>
             <label class="check"><input type="checkbox" id="show-dismissed"> show dismissed <span id="dismissed-count" class="count"></span></label>
             <button id="btn-dismiss-all" class="btn" title="Dismiss every account on this tab except pinned ones, including any hidden by the search box or filters. They come back if they join the room again.">Dismiss all but pinned</button>
           </div>

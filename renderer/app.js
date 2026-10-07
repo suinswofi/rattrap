@@ -11,6 +11,7 @@ const state = {
   tab: 'users', sort: { key: 'firstSeen', dir: 1 }, search: '',
   // Burners and Blacklist hits each remember their own filters: facet key -> 'yes' | 'no'
   filters: { burners: new Map(), blacklist: new Map() }, showDismissed: false,
+  suspectSort: { burners: 'rank', blacklist: 'rank' }, // 'rank' | 'joinAsc' | 'joinDesc', per tab
   logs: new Map(),      // room -> { sid, entries } — the live stream's whole log
   logSid: null,         // stream shown on the Chat/Log tabs; null = the live one
   pastLog: null,        // { room, sid, entries } fetched for an earlier stream
@@ -310,10 +311,14 @@ function suspectRows(mode = suspectMode()) {
   const all = (state.snap?.users ?? []).filter(onTab[mode]);
   const base = all.filter(u => matchesSearch(u, q) && (state.showDismissed || u.dismissedAt == null));
   const list = base.filter(u => passes(u, filters));
-  const order = mode === 'blacklist'
-    ? (a, b) => (b.pinned - a.pinned) || ((a.dismissedAt != null) - (b.dismissedAt != null)) || (b.hops - a.hops) || (b.blacklistScore - a.blacklistScore) || (b.score - a.score)
-    : (a, b) => (b.pinned - a.pinned) || ((a.dismissedAt != null) - (b.dismissedAt != null)) || (b.score - a.score);
-  list.sort(order);
+  const rank = mode === 'blacklist'
+    ? (a, b) => (b.hops - a.hops) || (b.blacklistScore - a.blacklistScore) || (b.score - a.score)
+    : (a, b) => b.score - a.score;
+  const sort = state.suspectSort[mode];
+  // Accounts with no join event seen go last in either direction; ties fall back to the rank.
+  const byJoin = dir => (a, b) => ((a.firstJoin == null) - (b.firstJoin == null)) || dir * ((a.firstJoin ?? 0) - (b.firstJoin ?? 0)) || rank(a, b);
+  const order = sort === 'joinAsc' ? byJoin(1) : sort === 'joinDesc' ? byJoin(-1) : rank;
+  list.sort((a, b) => (b.pinned - a.pinned) || ((a.dismissedAt != null) - (b.dismissedAt != null)) || order(a, b));
   return { all, base, list, dismissed: all.filter(u => u.dismissedAt != null).length };
 }
 
@@ -334,6 +339,7 @@ function renderSuspects() {
     const title = v === 'yes' ? `only accounts that ${f.label.toLowerCase()} — click to show only those that do not` : v === 'no' ? `hiding accounts that ${f.label.toLowerCase()} — click to switch off` : `click to show only accounts that ${f.label.toLowerCase()}`;
     return `<button class="chip ${v ?? ''}" data-filter="${f.key}" title="${esc(title)}">${v === 'yes' ? '✓ ' : v === 'no' ? '✗ ' : ''}${f.label}<span class="n">${n}</span></button>`;
   }).join('') + (filters.size ? '<button class="chip clear" data-filter="">clear filters</button>' : '');
+  $('#suspect-sort').value = state.suspectSort[mode];
   $('#dismissed-count').textContent = dismissed ? `(${dismissed})` : '';
   $('#btn-dismiss-all').disabled = !all.some(u => !u.pinned && u.dismissedAt == null);
   $('#suspects-list').innerHTML = list.slice(0, 300).map(u => `
@@ -346,7 +352,7 @@ function renderSuspects() {
         ${u.dismissedAt != null ? '<button data-action="restore" title="Put this account back on the list">Restore</button>' : `<button data-action="dismiss" title="Hide this account until it joins again" ${u.pinned ? 'disabled' : ''}>Dismiss</button>`}
         <button data-action="whitelist" title="Whitelist: trust this account, so it is never scored or flagged in this room again">Whitelist</button>
       </div>
-      <div class="stats">${plural(u.joins, 'join')} · ${plural(u.chats, 'chat')} · ${plural(u.likes, 'like')} · ${plural(u.gifts, 'gift')}${u.coins ? ` (${u.coins} coins)` : ''} · ${plural(u.shares, 'share')} · seen ${fmtTime(u.firstSeen)}–${fmtTime(u.lastSeen)} · ${plural(u.streamsSeen, 'stream')}${u.followers != null ? ` · ${num(u.followers)} followers` : ''}</div>
+      <div class="stats">${plural(u.joins, 'join')} · ${plural(u.chats, 'chat')} · ${plural(u.likes, 'like')} · ${plural(u.gifts, 'gift')}${u.coins ? ` (${u.coins} coins)` : ''} · ${plural(u.shares, 'share')} · ${u.firstJoin != null ? `joined ${fmtTime(u.firstJoin)}` : 'no join seen'} · seen ${fmtTime(u.firstSeen)}–${fmtTime(u.lastSeen)} · ${plural(u.streamsSeen, 'stream')}${u.followers != null ? ` · ${num(u.followers)} followers` : ''}</div>
       <div class="reasons">${u.reasons.map(r => `<span class="reason ${reasonClass(r)}">${esc(r)}</span>`).join('') || '<span class="reason">nothing suspicious</span>'}</div>
     </div>`).join('') || `<p class="note">${base.length ? 'Nothing matches every selected filter.' : dismissed && !state.showDismissed ? 'Everything is dismissed. Tick "show dismissed" to see them.' : mode === 'blacklist' ? (roomLists(state.current).blacklist.length ? 'No overlap with a blacklisted streamer this stream.' : 'No blacklisted streamers yet. Add one in the sidebar (and add them as a room) to cross-check.') : 'Nobody has a burner score above 0.'}</p>`;
 }
@@ -358,6 +364,7 @@ $('#suspect-filters').addEventListener('click', e => {
   else { const v = filters.get(k); if (!v) filters.set(k, 'yes'); else if (v === 'yes') filters.set(k, 'no'); else filters.delete(k); }
   renderSuspects();
 });
+$('#suspect-sort').addEventListener('change', e => { state.suspectSort[suspectMode()] = e.target.value; renderSuspects(); });
 $('#show-dismissed').addEventListener('change', e => { state.showDismissed = e.target.checked; renderSuspects(); });
 // Dismisses every account on this tab that is not pinned, including ones hidden by the search box or filters.
 $('#btn-dismiss-all').addEventListener('click', async () => {
@@ -531,7 +538,7 @@ async function renderDetail() {
   ];
   if (t) parts.push('<h4>This stream</h4>', kv([
     ['first seen', fmtTime(t.firstSeen)], ['last seen', fmtTime(t.lastSeen)],
-    ['joins', `${t.joins}${t.lastJoin && t.joins > 1 ? ` (last ${fmtTime(t.lastJoin)})` : ''}`], ['chats', t.chats], ['likes', t.likes], ['gifts', `${t.gifts} (${t.coins} coins)`], ['shares', t.shares],
+    ['joins', `${t.joins}${t.firstJoin != null ? ` (${t.joins > 1 ? `first ${fmtTime(t.firstJoin)}, last ${fmtTime(t.lastJoin)}` : fmtTime(t.firstJoin)})` : ''}`], ['chats', t.chats], ['likes', t.likes], ['gifts', `${t.gifts} (${t.coins} coins)`], ['shares', t.shares],
     ['hops', t.hops ? `${t.hops}, last: ${esc(t.lastHop ? `${fmtTime(t.lastHop.t)} ${t.lastHop.dir} @${t.lastHop.room}` : '')}` : '–'],
     ['flags', t.flags.map(f => `<span class="flag ${flagClass(f)}">${esc(flagText(f))}</span>`).join('') || '–'],
   ]));
