@@ -4,8 +4,8 @@ import { EventEmitter } from 'node:events';
 import { mkdtempSync, rmSync, existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { WebcastEvent, ControlEvent, UserOfflineError } from 'tiktok-live-connector';
-import { Monitor, DEFAULTS, normalizeConfig, configToJSON, roomLists, who } from './monitor.js';
+import { WebcastEvent, ControlEvent, UserOfflineError, SignatureRateLimitError, SignConfig } from 'tiktok-live-connector';
+import { Monitor, DEFAULTS, normalizeConfig, configToJSON, roomLists, who, rateLimitWait } from './monitor.js';
 import { makeSid, streamLabel } from './history.js';
 
 class FakeConnection extends EventEmitter {
@@ -734,4 +734,39 @@ test('reconnecting while waiting for the stream cancels the live check, so only 
     assert.ok(!m.logLines.some(l => l.kind === 'error'), 'no "Already connected" or live-check errors');
     m.stop();
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+const rateLimited = headers => new SignatureRateLimitError('You have reached the rate limit.', '(rate_limit_account_day) Too many connections started, try again later.', { headers });
+
+test('rateLimitWait() reads the reset as a time or as seconds, within a minute and a day', () => {
+  const now = Date.UTC(2026, 9, 6, 12);
+  assert.equal(rateLimitWait(rateLimited({ 'x-ratelimit-reset': String(now / 1000 + 3600) }), now), 3600_000, 'epoch seconds');
+  assert.equal(rateLimitWait(rateLimited({ 'x-ratelimit-reset': '1800' }), now), 1800_000, 'seconds from now');
+  assert.equal(rateLimitWait(rateLimited({ 'retry-after': '120' }), now), 120_000);
+  assert.equal(rateLimitWait(rateLimited({ 'retry-after': '5' }), now), 60_000, 'at least a minute');
+  assert.equal(rateLimitWait(rateLimited({ 'x-ratelimit-reset': String(now / 1000 + 9 * 86400) }), now), 86400_000, 'at most a day');
+  assert.equal(rateLimitWait(rateLimited({}), now), null);
+});
+
+test('a rate-limited room waits for the reset, and retries at once with a new API key', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'rattrap-'));
+  const savedKey = SignConfig.apiKey;
+  try {
+    const reset = Date.now() + 2 * 3600_000;
+    const made = [];
+    class Limited extends FakeConnection { async connect() { throw rateLimited({ 'x-ratelimit-reset': String(Math.floor(reset / 1000)) }); } }
+    const cfg = cfgFor(dir);
+    const m = new Monitor('host', cfg, { createConnection: (_u, o) => { made.push(o.signApiKey); return o.signApiKey ? new FakeConnection() : new Limited(); } });
+    m.start(); await tick();
+    assert.equal(m.state, 'reconnecting');
+    assert.match(m.stateMessage, /rate limited by the sign server, retrying .*at \d\d:\d\d\. An Euler Stream API key in Settings/);
+    assert.ok(Math.abs(m.rateLimitedUntil - reset) < 2000, 'waits until the reported reset');
+    assert.ok(m.logLines.some(l => l.kind === 'error' && /rate_limit_account_day/.test(l.text ?? l.message ?? JSON.stringify(l))));
+    cfg.signApiKey = 'k';
+    m.signApiKeyChanged(); await tick();
+    assert.deepEqual(made, [undefined, 'k'], 'a fresh connection carries the new key');
+    assert.equal(m.state, 'live');
+    assert.equal(m.rateLimitedUntil, null);
+    m.stop();
+  } finally { SignConfig.apiKey = savedKey; SignConfig.cachedInstance = undefined; rmSync(dir, { recursive: true, force: true }); }
 });

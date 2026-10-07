@@ -22,7 +22,7 @@
 import { EventEmitter } from 'node:events';
 import { readFileSync, writeFileSync, appendFileSync, mkdirSync, existsSync, readdirSync, unlinkSync } from 'node:fs';
 import { join as pathJoin, dirname, isAbsolute } from 'node:path';
-import { TikTokLiveConnection, WebcastEvent, ControlEvent, UserOfflineError, SignatureRateLimitError } from 'tiktok-live-connector';
+import { TikTokLiveConnection, WebcastEvent, ControlEvent, UserOfflineError, SignatureRateLimitError, SignConfig } from 'tiktok-live-connector';
 import { ViewerTracker } from './tracker.js';
 import { RoomHistory, historyFile, loadRoomIndex, makeSid, streamLabel, dateOf, RETAINED_KINDS } from './history.js';
 import { scoreUser, hopText } from './burner.js';
@@ -118,6 +118,32 @@ const LIVE_STATUSES = new Set([2, 3]); // TikTok room status: 2 live, 3 paused (
 const STREAM_ENDED = 3;                // ControlAction: the stream is over for good (4 = suspended, which can resume)
 const SILENCE_MS = 5 * 60_000;         // nothing heard for this long while "live": ask TikTok whether it really is
 
+/** Point the library's process-wide sign client at a new API key ('' = none); the next connection builds it afresh. */
+export function applySignApiKey(key) {
+  SignConfig.apiKey = key || process.env.SIGN_API_KEY;
+  SignConfig.cachedInstance = undefined;
+}
+
+/**
+ * How long to wait out a sign-server rate limit, from what the error reports, or null when it reports nothing.
+ * The reset header may be a time or a number of seconds; the library multiplies either by 1000. Between a minute
+ * and a day.
+ */
+export function rateLimitWait(err, now = Date.now()) {
+  const reset = err?.resetTime > 1e12 ? err.resetTime - now : err?.resetTime;
+  const waits = [err?.retryAfter, reset].filter(ms => Number.isFinite(ms) && ms > 0);
+  if (!waits.length) return null;
+  return Math.min(Math.max(...waits, 60_000), 24 * 3600_000);
+}
+
+const pad2 = n => String(n).padStart(2, '0');
+/** "at 14:05", or "on 2026-10-08 at 14:05" when that is not today. */
+function fmtWhen(ts, now = Date.now()) {
+  const d = new Date(ts), today = new Date(now);
+  const hm = `at ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+  return d.toDateString() === today.toDateString() ? hm : `on ${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${hm}`;
+}
+
 export class Monitor extends EventEmitter {
   /**
    * @param {string} username   streamer to monitor
@@ -149,6 +175,8 @@ export class Monitor extends EventEmitter {
     this.quitting = false;
     this.reconnectTimer = null;
     this.reconnectDelay = 10_000;
+    this.rateLimitedUntil = null;     // when a wait for the sign server's rate limit ends, while there is one
+    this.connKey = undefined;         // the API key this.conn was made with
     this.timers = [];
     this.attempt = 0;                 // bumped to abandon whatever connect or live check is in flight
     this.connecting = false;          // conn.connect() is running
@@ -178,8 +206,7 @@ export class Monitor extends EventEmitter {
     // Pick the last stream back up so its users and log are there while we wait for the next one.
     const latest = this.history.latestStream();
     if (this.cfg.resume && latest) this._loadStream(latest, true);
-    this.conn = this.createConnection(this.username, { ...(this.cfg.signApiKey ? { signApiKey: this.cfg.signApiKey } : {}), processInitialData: true });
-    this._bind(this.conn);
+    this._newConnection();
     if (this.cfg.autosaveMinutes > 0) this.timers.push(setInterval(() => { try { this.save(); } catch (e) { this._log('error', `autosave failed: ${e.message}`); } }, this.cfg.autosaveMinutes * 60_000));
     this.timers.push(setInterval(() => this._checkSilence(), 60_000));
     for (const t of this.timers) t.unref?.();
@@ -210,6 +237,20 @@ export class Monitor extends EventEmitter {
     this._connect();
   }
 
+  /**
+   * Open a fresh connection object with the current API key. The library keeps one Euler Stream client for
+   * the whole process, built with whatever key was set the first time, and each connection holds on to it;
+   * so a changed key needs that client thrown away and a new connection.
+   */
+  _newConnection() {
+    const old = this.conn;
+    if (old) { old.removeAllListeners(); Promise.resolve().then(() => old.disconnect()).catch(() => {}); }
+    if (this.connKey !== undefined && this.connKey !== this.cfg.signApiKey) applySignApiKey(this.cfg.signApiKey);
+    this.connKey = this.cfg.signApiKey;
+    this.conn = this.createConnection(this.username, { ...(this.cfg.signApiKey ? { signApiKey: this.cfg.signApiKey } : {}), processInitialData: true });
+    this._bind(this.conn);
+  }
+
   /** Cancel any pending retry or live check, so only one connect attempt is ever in flight. */
   _abandonConnect() {
     this.attempt++;
@@ -228,6 +269,8 @@ export class Monitor extends EventEmitter {
     this._abandonConnect();
     const attempt = this.attempt;
     const abandoned = () => this.quitting || attempt !== this.attempt;
+    this.rateLimitedUntil = null;
+    if (this.connKey !== this.cfg.signApiKey) this._newConnection(); // the API key changed in Settings
     try {
       this._setState('connecting', 'connecting…');
       this.backlog = true; // the library replays the initial batch before connect() resolves
@@ -271,14 +314,18 @@ export class Monitor extends EventEmitter {
         this._setState('waiting', `not live, checking every ${this.cfg.livePollSeconds}s`);
         const check = this.liveCheck = new AbortController();
         try { await this.conn.waitUntilLive(this.cfg.livePollSeconds, check.signal); }
-        catch (e) { if (abandoned()) return; this._log('error', `live check failed: ${e.message}`); return this._scheduleReconnect(); }
+        catch (e) {
+          if (abandoned()) return;
+          this._log('error', `live check failed: ${e.message}`);
+          return e instanceof SignatureRateLimitError ? this._waitOutRateLimit(e) : this._scheduleReconnect();
+        }
         finally { if (this.liveCheck === check) this.liveCheck = null; }
         if (abandoned()) return;
         this._log('system', 'went live!');
         return this._connect();
       }
-      if (err instanceof SignatureRateLimitError) this.reconnectDelay = Math.max(this.reconnectDelay, 60_000);
       this._log('error', `connect failed: ${err.message}`);
+      if (err instanceof SignatureRateLimitError) return this._waitOutRateLimit(err);
       this._scheduleReconnect();
     }
   }
@@ -341,9 +388,33 @@ export class Monitor extends EventEmitter {
   _scheduleReconnect() {
     if (this.quitting || this.reconnectTimer) return;
     this._setState('reconnecting', `retrying in ${Math.round(this.reconnectDelay / 1000)}s`);
-    this.reconnectTimer = setTimeout(() => { this.reconnectTimer = null; this._connect(); }, this.reconnectDelay);
-    this.reconnectTimer.unref?.();
+    this._retryIn(this.reconnectDelay);
     this.reconnectDelay = Math.min(this.reconnectDelay * 2, 5 * 60_000);
+  }
+
+  _retryIn(ms) {
+    this.reconnectTimer = setTimeout(() => { this.reconnectTimer = null; this._connect(); }, ms);
+    this.reconnectTimer.unref?.();
+  }
+
+  /**
+   * The sign server refused to sign a connection. Every attempt goes through it, so retrying before its limit
+   * resets only fails again: wait until the reset it reports. Without one, back off up to half an hour.
+   */
+  _waitOutRateLimit(err, now = Date.now()) {
+    if (this.quitting || this.reconnectTimer) return;
+    const reported = rateLimitWait(err, now);
+    const wait = reported ?? Math.max(this.reconnectDelay, 60_000);
+    if (reported == null) this.reconnectDelay = Math.min(Math.max(this.reconnectDelay, 60_000) * 2, 30 * 60_000);
+    this.rateLimitedUntil = now + wait;
+    const hint = this.cfg.signApiKey ? '' : '. An Euler Stream API key in Settings raises the limit';
+    this._setState('reconnecting', `rate limited by the sign server, retrying ${fmtWhen(this.rateLimitedUntil, now)}${hint}`);
+    this._retryIn(wait);
+  }
+
+  /** The API key changed: a room held back by the sign server's limit tries again at once with the new key. */
+  signApiKeyChanged() {
+    if (this.rateLimitedUntil != null && this.state === 'reconnecting') this.reconnect();
   }
 
   _setState(state, message) {

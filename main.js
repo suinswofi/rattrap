@@ -91,8 +91,10 @@ ipcMain.handle('config:set', (_e, patch) => {
   const next = { ...cfg };
   for (const k of allowed) if (patch && patch[k] !== undefined) next[k] = patch[k];
   normalizeConfig(next, null); // throws on bad values; dataDir already absolute
+  const keyChanged = next.signApiKey !== cfg.signApiKey;
   Object.assign(cfg, next);
   for (const m of monitors.values()) m.tracker.chatHistory = cfg.chatHistory;
+  if (keyChanged) for (const m of monitors.values()) m.signApiKeyChanged();
   saveConfig();
   return configToJSON(cfg);
 });

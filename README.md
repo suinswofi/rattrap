@@ -87,6 +87,12 @@ connect it also replays TikTok's backlog of recent events, stamped with TikTok's
 so people who arrived shortly before Rat Trap connected are picked up with their real arrival time
 (their log lines say "before Rat Trap connected").
 
+Every connect goes through Euler Stream's sign server, which limits how many connections you can
+start without an API key. When a room hits that limit, Rat Trap waits until the limit resets and
+shows when it will try again ("rate limited by the sign server, retrying at 14:05") rather than
+retrying every minute. Entering a key in Settings takes effect at once: rooms that are waiting
+out the limit reconnect straight away with the new key, with no restart needed.
+
 ## What is remembered
 
 These files live in `data/`:
