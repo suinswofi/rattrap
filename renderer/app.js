@@ -772,7 +772,7 @@ $('#users-table thead').addEventListener('click', e => {
   if (e.target.closest('.col-resize')) return;
   const th = e.target.closest('th[data-key]'); if (!th) return;
   const key = th.dataset.key;
-  state.sort = state.sort.key === key ? { key, dir: -state.sort.dir } : { key, dir: ['username', 'firstSeen', 'lastSeen', 'firstSeenEver'].includes(key) ? 1 : -1 };
+  state.sort = state.sort.key === key ? { key, dir: -state.sort.dir } : { key, dir: ['username', 'firstJoin', 'firstSeen', 'lastSeen', 'firstSeenEver'].includes(key) ? 1 : -1 };
   renderTable();
 });
 for (const b of document.querySelectorAll('.tab-btn')) b.addEventListener('click', () => setTab(b.dataset.tab));
