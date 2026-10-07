@@ -715,6 +715,7 @@ const HELP = {
   <li>their burner score is <b>0</b> with no reasons, however new, empty or auto-named the account looks,</li>
   <li>no <b>alert</b> is raised for them — not for a score, not for hopping to or from a blacklisted streamer's stream,</li>
   <li>they never appear on the <b>Burners</b> or <b>Blacklist hits</b> tabs, and any flag already raised this stream is dropped the moment you whitelist them,</li>
+  <li>they are taken off this room's <b>watch list</b> if they were on it,</li>
   <li>and they are tagged <code>white</code> in the tables.</li>
 </ul>
 <p>Everything else carries on as normal: they still show up on the <b>Users</b> tab, the <b>Log</b> and <b>Chat</b> tabs, and in the history, with their joins, chats and gifts counted. Whitelisting says "stop accusing this one", not "stop watching the room".</p>

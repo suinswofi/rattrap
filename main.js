@@ -111,6 +111,8 @@ ipcMain.handle('list:edit', (_e, room, list, op, names) => {
   const set = lists[list];
   const clean = nameSet(Array.isArray(names) ? names : String(names).split(/[\s,]+/));
   for (const n of clean) op === 'remove' ? set.delete(n) : set.add(n);
+  // A trusted account no longer needs watching, so whitelisting takes it off the watch list.
+  if (list === 'whitelist' && op !== 'remove') for (const n of clean) lists.watch.delete(n);
   saveConfig();
   const m = monitors.get(normalizeUsername(room));
   // A newly pinned or watched account gets its whole logged past copied into the history.
