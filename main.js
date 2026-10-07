@@ -6,7 +6,7 @@ import { writeFileSync, mkdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
-import { Monitor, readConfigFile, normalizeConfig, configToJSON, normalizeUsername, nameSet, roomLists } from './monitor.js';
+import { Monitor, readConfigFile, normalizeConfig, applySettings, configToJSON, normalizeUsername, nameSet, roomLists } from './monitor.js';
 import { createDemoConnection, DEMO_ROOMS } from './demo.js';
 import electronUpdater from 'electron-updater'; // CommonJS package: named imports do not work from ESM
 import { downloadPortable, installPortable, cleanupOld } from './portable-update.js';
@@ -87,14 +87,9 @@ const getMonitor = name => {
 // ---------- IPC ----------
 ipcMain.handle('config:get', () => ({ ...configToJSON(cfg), configFile: CONFIG_FILE }));
 ipcMain.handle('config:set', (_e, patch) => {
-  const allowed = ['burnerAlertScore', 'autosaveMinutes', 'signApiKey', 'reconnectWhenLive', 'livePollSeconds', 'chatHistory', 'resume', 'pruneAfterDays', 'maxUsers', 'logKeepDays', 'popupSeconds'];
-  const next = { ...cfg };
-  for (const k of allowed) if (patch && patch[k] !== undefined) next[k] = patch[k];
-  normalizeConfig(next, null); // throws on bad values; dataDir already absolute
-  const keyChanged = next.signApiKey !== cfg.signApiKey;
-  Object.assign(cfg, next);
+  const changed = applySettings(cfg, patch); // throws on bad values
   for (const m of monitors.values()) m.tracker.chatHistory = cfg.chatHistory;
-  if (keyChanged) for (const m of monitors.values()) m.signApiKeyChanged();
+  if (changed.includes('signApiKey')) for (const m of monitors.values()) m.signApiKeyChanged();
   saveConfig();
   return configToJSON(cfg);
 });

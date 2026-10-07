@@ -94,6 +94,24 @@ export function roomLists(cfg, room) {
 }
 
 /** Plain-JSON view of a config (Sets become arrays) for saving or sending to a renderer. */
+/** Config keys the Settings dialog may change. */
+export const SETTINGS_KEYS = ['burnerAlertScore', 'autosaveMinutes', 'signApiKey', 'reconnectWhenLive', 'livePollSeconds', 'chatHistory', 'resume', 'pruneAfterDays', 'maxUsers', 'logKeepDays', 'popupSeconds'];
+
+/**
+ * Apply a patch from the Settings dialog to the live config. Only settings keys change: everything else,
+ * the per-room lists above all, is left as it is, because each running Monitor holds on to its room's list
+ * Sets and would stop seeing edits made to a rebuilt copy. Throws on bad values, changing nothing.
+ * Returns the keys whose value changed.
+ */
+export function applySettings(cfg, patch) {
+  const next = { ...cfg };
+  for (const k of SETTINGS_KEYS) if (patch && patch[k] !== undefined) next[k] = patch[k];
+  normalizeConfig(next, null); // validates; rebuilds next's lists, which are thrown away
+  const changed = SETTINGS_KEYS.filter(k => next[k] !== cfg[k]);
+  for (const k of changed) cfg[k] = next[k];
+  return changed;
+}
+
 export function configToJSON(cfg) {
   const { legacyLists, ...rest } = cfg;
   return { ...rest, lists: Object.fromEntries(Object.entries(cfg.lists).map(([r, l]) => [r, { watch: [...l.watch], blacklist: [...l.blacklist], whitelist: [...(l.whitelist ?? [])], pinned: [...(l.pinned ?? [])] }])) };

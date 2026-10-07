@@ -5,7 +5,7 @@ import { mkdtempSync, rmSync, existsSync, readFileSync, readdirSync, writeFileSy
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { WebcastEvent, ControlEvent, UserOfflineError, SignatureRateLimitError, SignConfig } from 'tiktok-live-connector';
-import { Monitor, DEFAULTS, normalizeConfig, configToJSON, roomLists, who, rateLimitWait } from './monitor.js';
+import { Monitor, DEFAULTS, normalizeConfig, applySettings, configToJSON, roomLists, who, rateLimitWait } from './monitor.js';
 import { makeSid, streamLabel } from './history.js';
 
 class FakeConnection extends EventEmitter {
@@ -769,4 +769,24 @@ test('a rate-limited room waits for the reset, and retries at once with a new AP
     assert.equal(m.rateLimitedUntil, null);
     m.stop();
   } finally { SignConfig.apiKey = savedKey; SignConfig.cachedInstance = undefined; rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('saving settings leaves the room lists alone, so list edits still reach a running monitor', () => {
+  const cfg = cfgFor('/tmp/unused', { lists: { host: { blacklist: ['badguy'], watch: ['vip'], whitelist: ['friend'], pinned: ['keep'] } } });
+  const m = new Monitor('host', cfg, { createConnection: () => new FakeConnection() });
+  const lists = cfg.lists;
+  assert.deepEqual(applySettings(cfg, { burnerAlertScore: '5', signApiKey: 'k', chatHistory: 50 }), ['burnerAlertScore', 'signApiKey'], 'only changed keys');
+  assert.equal(cfg.burnerAlertScore, 5);
+  assert.equal(cfg.lists, lists, 'the lists object is the same one');
+  // what the Watch, Pin, Whitelist and Blacklist buttons do (main.js list:edit)
+  for (const [list, name] of [['watch', 'newwatch'], ['pinned', 'newpin'], ['whitelist', 'newfriend'], ['blacklist', 'rival']]) roomLists(cfg, 'host')[list].add(name);
+  assert.equal(m.watched('newwatch'), true);
+  assert.equal(m.pinned('newpin'), true);
+  assert.equal(m.whitelisted('newfriend'), true);
+  assert.equal(m.lists.blacklist.has('rival'), true);
+  assert.equal(m.watched('vip'), true, 'entries from before the save are kept');
+  assert.throws(() => applySettings(cfg, { burnerAlertScore: 'lots' }));
+  assert.equal(cfg.burnerAlertScore, 5, 'a bad value changes nothing');
+  assert.equal(cfg.lists, lists);
+  assert.equal(configToJSON(cfg).lists.host.watch.includes('newwatch'), true, 'and they are what gets saved');
 });
