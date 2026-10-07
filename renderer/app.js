@@ -178,6 +178,7 @@ const COLUMNS = [
   { key: 'username', label: 'User', width: 260, render: u => `<span title="${esc(u.username)}${u.nickname && u.nickname !== u.username ? ` (${esc(u.nickname)})` : ''}">${esc(u.username)}${u.nickname && u.nickname !== u.username ? `<span class="nick">${esc(u.nickname)}</span>` : ''}</span>`, cls: 'user' },
   { key: 'score', label: 'Score', width: 72, num: true, render: u => `<span class="score ${scoreClass(u.score)}" title="${esc(u.reasons.join('; ') || 'nothing suspicious')}">${u.score}</span>` },
   { key: 'joins', label: 'Joins', width: 68, num: true, render: u => u.joins },
+  { key: 'firstJoin', label: 'First join', width: 90, render: u => u.firstJoin == null ? '<span title="no join seen this stream">–</span>' : fmtTime(u.firstJoin) },
   { key: 'chats', label: 'Chats', width: 70, num: true, render: u => u.chats },
   { key: 'likes', label: 'Likes', width: 70, num: true, render: u => u.likes },
   { key: 'gifts', label: 'Gifts', width: 64, num: true, render: u => u.gifts },
