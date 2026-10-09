@@ -689,12 +689,13 @@ test('reconnecting to the room of an ended stream does not resume it as live (no
 test('a connection that goes quiet is checked, and ended if the streamer is not live', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'rattrap-'));
   try {
-    let live = false;
+    let live = true;
     class Conn extends FakeConnection { async fetchIsLive() { return live; } }
     const conn = new Conn();
     const m = new Monitor('host', cfgFor(dir), { createConnection: () => conn });
     m.start(); await tick();
     assert.equal(m.state, 'live');
+    live = false;
 
     await m._checkSilence();
     assert.equal(m.state, 'live', 'not checked before it has been quiet for a while');
@@ -789,4 +790,53 @@ test('saving settings leaves the room lists alone, so list edits still reach a r
   assert.equal(cfg.burnerAlertScore, 5, 'a bad value changes nothing');
   assert.equal(cfg.lists, lists);
   assert.equal(configToJSON(cfg).lists.host.watch.includes('newwatch'), true, 'and they are what gets saved');
+});
+
+test('an offline streamer is not shown as live, though TikTok lets the app connect to their last room', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'rattrap-'));
+  try {
+    // What TikTok really does for an offline streamer: connect() succeeds, the room info has no status
+    // (status_code 4003110) and the replayed batch has no "stream ended" in it.
+    let live = false, connects = 0, waiting = null;
+    class Conn extends FakeConnection {
+      async fetchIsLive() { return live; }
+      async connect() { connects++; this.connected = true; return { roomId: this.roomId, roomInfo: { data: { prompts: '' }, status_code: 4003110 } }; }
+      waitUntilLive() { return new Promise(r => { waiting = r; }); }
+    }
+    const conn = new Conn();
+    const m = new Monitor('host', cfgFor(dir), { createConnection: () => conn });
+    m.start(); await tick();
+    assert.equal(m.state, 'waiting');
+    assert.equal(m.room.live, false);
+    assert.equal(m.snapshot().uptime, 0);
+    assert.equal(connects, 0, 'never connects to the room of an offline streamer');
+    assert.ok(waiting, 'waits for the streamer to go live');
+    live = true; waiting(); await tick();
+    assert.equal(m.state, 'live');
+    m.stop();
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('each connect looks the room id up afresh, so a new stream is not joined in the old room', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'rattrap-'));
+  try {
+    let current = 'r1';
+    // Like the library: connect() reuses the room id it already has unless fetchRoomId() replaces it.
+    class Conn extends FakeConnection {
+      async fetchIsLive() { return true; }
+      async fetchRoomId() { this.roomId = current; return current; }
+    }
+    const conn = new Conn([], null);
+    const m = new Monitor('host', cfgFor(dir), { createConnection: () => conn });
+    m.start(); await tick();
+    assert.equal(m.room.id, 'r1');
+    const first = m.stream.sid;
+    conn.emit(WebcastEvent.STREAM_END, { action: 3 });
+    current = 'r2';
+    await m._connect(); await tick();
+    assert.equal(m.state, 'live');
+    assert.equal(m.room.id, 'r2', 'the new room, not the ended one');
+    assert.notEqual(m.stream.sid, first, 'a new stream');
+    m.stop();
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });

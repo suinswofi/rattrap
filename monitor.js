@@ -297,7 +297,16 @@ export class Monitor extends EventEmitter {
       // Events replayed during connect() belong to the stream we are about to identify; hold them until then.
       this._pending = [];
       this.connecting = true;
-      try { state = await this.conn.connect(); } finally { this.backlog = false; this.connecting = false; }
+      try {
+        // TikTok lets anyone connect to an offline streamer's last room: connect() succeeds, the room info comes
+        // back empty (no status) and nothing says the stream is over. So ask whether they are live first.
+        if (this.conn.fetchIsLive && !(await this.conn.fetchIsLive())) throw new UserOfflineError('The requested user isn\'t online :(');
+        // The library keeps the room id of its first connect and reuses it on every later one; look it up afresh
+        // so a new stream is joined in its own room rather than the old one.
+        if (this.conn.fetchRoomId) await this.conn.fetchRoomId();
+        if (abandoned()) { this._pending = null; return; }
+        state = await this.conn.connect();
+      } finally { this.backlog = false; this.connecting = false; }
       if (abandoned()) { this._pending = null; return this._disconnect(); }
       this.reconnectDelay = 10_000;
       const now = Date.now();

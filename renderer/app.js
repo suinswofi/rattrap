@@ -608,7 +608,11 @@ async function refreshRooms() {
 
 async function refreshSnapshot() {
   if (!state.current) { state.snap = null; renderHeader(); renderTable(); return; }
-  try { state.snap = await api.snapshot(state.current); } catch { state.snap = null; }
+  const room = state.current;
+  let snap;
+  try { snap = await api.snapshot(room); } catch { snap = null; }
+  if (room !== state.current) return; // another room was picked meanwhile; its own refresh is on the way
+  state.snap = snap;
   renderHeader();
   if (state.tab === 'users') renderTable();
   if (state.tab === 'burners' || state.tab === 'blacklist') renderSuspects();
@@ -617,6 +621,7 @@ async function refreshSnapshot() {
 
 async function selectRoom(room) {
   state.current = room;
+  state.snap = null; // the previous room's snapshot must never show under this room's name
   state.logSid = null; state.pastLog = null; state.shown = { log: LOG_CHUNK, chat: LOG_CHUNK };
   closeDetail();
   await ensureLog(room);
